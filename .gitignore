@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+venv/
+.venv/
+
+# Datenbank & Logs (werden zur Laufzeit erstellt)
+*.db
+*.sqlite
+*.sqlite3
+*.log
+
+# SSH Keys (werden vom install.sh generiert, niemals committen!)
+id_rsa
+id_rsa.pub
+id_ed25519
+id_ed25519.pub
+*.pem
+
+# Umgebungsvariablen & Secrets
+.env
+*.env
+
+# Betriebssystem & IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Lokale Test-/Cache-Verzeichnisse (falls man lokal testet)
+cache/
+data/

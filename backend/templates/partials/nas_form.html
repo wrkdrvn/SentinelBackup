@@ -1,0 +1,92 @@
+{# Partials: Komplettes NAS-Formular inkl. Umgebungs-Div.
+   Dieser Block ist gleichzeitig HTMX-Ziel (#nas-form-wrapper) und
+   Antwort-Snippet der /nas/save-Route (outerHTML-Swap gegen sich selbst).
+   Dadurch sieht der User sofort die gespeicherten Werte + Erfolgs-Alert. #}
+<div id="nas-form-wrapper">
+    {% if success %}
+    <div class="alert alert-success alert-dismissible fade show" role="alert">
+        <i class="bi bi-check-circle me-1"></i>NAS-Konfiguration erfolgreich gespeichert.
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% endif %}
+
+    <div class="card">
+        <div class="card-body">
+            <form hx-post="/nas/save"
+                  hx-target="#nas-form-wrapper"
+                  hx-swap="outerHTML">
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label class="form-label">MAC-Adresse (Wake-on-LAN)</label>
+                        <input type="text" name="mac" class="form-control"
+                               value="{{ nas.mac if nas else '' }}"
+                               placeholder="AA:BB:CC:DD:EE:FF">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">IP-Adresse *</label>
+                        <input type="text" name="ip" class="form-control" required
+                               value="{{ nas.ip if nas else '' }}"
+                               placeholder="10.0.0.50">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">SSH-Port</label>
+                        <input type="number" name="ssh_port" class="form-control"
+                               value="{{ nas.ssh_port if nas else 2022 }}" min="1" max="65535">
+                        <small class="text-secondary">Synology-Standard 2022</small>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Share-Pfad *</label>
+                        <input type="text" name="share_path" class="form-control" required
+                               value="{{ nas.share_path if nas else '' }}"
+                               placeholder="//nas.local/backups">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Mount-Point</label>
+                        <input type="text" name="mount_point" class="form-control"
+                               value="{{ nas.mount_point if nas else '/mnt/nas' }}">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Benutzer *</label>
+                        <input type="text" name="user" class="form-control" required
+                               value="{{ nas.user if nas else '' }}"
+                               placeholder="backupuser">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Passwort *</label>
+                        <input type="password" name="password" class="form-control" required
+                               value="{{ nas.password if nas else '' }}">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">SSH Shutdown-Kommando</label>
+                        <input type="text" name="ssh_shutdown_cmd" class="form-control"
+                               value="{{ nas.ssh_shutdown_cmd if nas else 'sudo synoshutdown --shutdown' }}">
+                        <div class="alert alert-warning mt-2 small mb-0 py-2">
+                            <i class="bi bi-exclamation-triangle me-1"></i>
+                            <strong>Synology-Hinweis:</strong> Der Befehl
+                            <code>sudo synoshutdown --shutdown</code> erfordert
+                            einen passwortlosen Sudoers-Eintrag auf der NAS.
+                            Legen Sie dort (als admin via SSH) folgende Datei an:
+                            <pre class="mb-1 mt-1 p-2 bg-dark text-light rounded"><code>sudo visudo -f /etc/sudoers.d/sentinelbackup</code></pre>
+                            Inhalt:
+                            <pre class="mb-0 p-2 bg-dark text-light rounded"><code>{{ nas.user if nas else 'admin' }} ALL=(root) NOPASSWD: /usr/syno/sbin/synoshutdown</code></pre>
+                        </div>
+                    </div>
+                </div>
+                <div class="mt-4 d-flex gap-2 flex-wrap">
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-save me-1"></i>Speichern
+                    </button>
+                    <button type="button"
+                            class="btn btn-outline-secondary"
+                            hx-post="/nas/test"
+                            hx-target="#nas-test-result"
+                            hx-swap="innerHTML"
+                            hx-include="[name='ip'], [name='share_path'], [name='user'], [name='password']">
+                        <i class="bi bi-plug me-1"></i>Verbindung testen
+                    </button>
+                </div>
+            </form>
+            <div id="nas-test-result" class="mt-3"></div>
+        </div>
+    </div>
+</div>

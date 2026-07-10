@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% set active_page = "Client Scripts" %}
+
+{% block content %}
+<h1 class="h3 mb-4"><i class="bi bi-download me-2"></i>Agent Installer</h1>
+
+<div class="row g-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body">
+                <div class="d-flex align-items-center mb-3">
+                    <i class="bi bi-box-seam fs-1 text-primary me-3"></i>
+                    <div>
+                        <h4 class="mb-1">SentinelBackup Agent</h4>
+                        <p class="text-secondary mb-0">
+                            Ein interaktiver Installer fuer alle Zielservertypen
+                            (ISPConfig, MailCow, Docker/Portainer).
+                        </p>
+                    </div>
+                </div>
+                <hr>
+                <h6 class="text-uppercase text-secondary">Anleitung</h6>
+                <ol class="mb-3">
+                    <li>Laden Sie die Datei <code>setup_agent.sh</code> herunter.</li>
+                    <li>Uebertragen Sie sie auf den Zielserver
+                        (z.&nbsp;B. <code>scp setup_agent.sh root@ziel:/root/</code>).</li>
+                    <li>Fuehren Sie sie als Root aus:
+                        <code>sudo bash setup_agent.sh</code></li>
+                    <li>Der Installer fragt den Servertyp ab, richtet den Agenten
+                        unter <code>/opt/sentinel_agent/</code> ein, erzeugt das
+                        Backup-Skript und traegt den Cronjob automatisch ein.</li>
+                    <li>Fuegen Sie den Server anschliessend im SentinelBackup
+                        WebUI hinzu. Die Standardpfade sind bereits vorausgefuellt:
+                        <br>
+                        <code>Backup-Pfad: /opt/sentinel_agent/data/</code>
+                        <br>
+                        <code>Flag-Pfad:&nbsp;&nbsp; /opt/sentinel_agent/.backup_done</code>
+                    </li>
+                </ol>
+                <a href="/download_script/agent" class="btn btn-primary btn-lg">
+                    <i class="bi bi-download me-2"></i>setup_agent.sh herunterladen
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,38 @@
+{# Partials: NUR <tr>-Zeilen der Server-Tabelle.
+   Wird initial per {% include %} geladen und bei HTMX-POSTs
+   (/servers/add, /servers/delete/<id>) als Antwort in
+   #server-table-body reingeswappt. #}
+{% if servers %}
+    {% for s in servers %}
+    <tr>
+        <td>{{ s.id }}</td>
+        <td><i class="bi bi-hdd me-1 text-secondary"></i>{{ s.hostname }}</td>
+        <td><code>{{ s.ip }}</code></td>
+        <td>{{ s.ssh_user }}</td>
+        <td><span class="badge text-bg-info">{{ s.server_type }}</span></td>
+        <td>
+            {% if s.active %}
+                <span class="badge text-bg-success">aktiv</span>
+            {% else %}
+                <span class="badge text-bg-secondary">inaktiv</span>
+            {% endif %}
+        </td>
+        <td class="text-end">
+            <button class="btn btn-sm btn-outline-danger"
+                    hx-post="/servers/delete/{{ s.id }}"
+                    hx-target="#server-table-body"
+                    hx-swap="innerHTML"
+                    hx-confirm="Server '{{ s.hostname }}' wirklich loeschen?">
+                <i class="bi bi-trash"></i>
+            </button>
+        </td>
+    </tr>
+    {% endfor %}
+{% else %}
+    <tr>
+        <td colspan="7" class="text-center text-secondary py-4">
+            <i class="bi bi-inbox fs-3 d-block mb-2"></i>
+            Noch keine Server konfiguriert.
+        </td>
+    </tr>
+{% endif %}

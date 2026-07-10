@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% set active_page = "NAS Config" %}
+
+{% block content %}
+<h1 class="h3 mb-4"><i class="bi bi-hdd-stack me-2"></i>NAS-Konfiguration</h1>
+
+<p class="text-secondary">
+    Konfiguration des NAS, auf dem die Backup-Archive abgelegt werden.
+    Beim Speichern wird der Eintrag in der Datenbank aktualisiert.
+</p>
+
+<!-- Formular wird als Partial eingebunden und bei Save per HTMX
+     gegen sich selbst (outerHTML) getauscht -->
+{% include "partials/nas_form.html" %}
+{% endblock %}

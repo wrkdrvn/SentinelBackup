@@ -1,0 +1,166 @@
+{% extends "base.html" %}
+{% set active_page = "Dashboard" %}
+
+{% block content %}
+<h1 class="h3 mb-4"><i class="bi bi-speedometer2 me-2"></i>Dashboard</h1>
+
+<div class="row g-4">
+    <!-- Statistik: Aktive Server -->
+    <div class="col-md-4">
+        <div class="card text-bg-primary h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <div class="text-uppercase small opacity-75">Aktive Server</div>
+                        <div class="display-6 fw-bold">{{ active_servers }}</div>
+                    </div>
+                    <i class="bi bi-hdd-network fs-1 opacity-75"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Statistik: Gesamte Server -->
+    <div class="col-md-4">
+        <div class="card text-bg-secondary h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <div class="text-uppercase small opacity-75">Server gesamt</div>
+                        <div class="display-6 fw-bold">{{ total_servers }}</div>
+                    </div>
+                    <i class="bi bi-server fs-1 opacity-75"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Platzhalter -->
+    <div class="col-md-4">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <div class="text-uppercase small text-secondary">Version</div>
+                        <div class="display-6 fw-bold">{{ version }}</div>
+                    </div>
+                    <i class="bi bi-shield-check fs-1 text-secondary"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Routine-Einstellungen -->
+<div class="card mt-4">
+    <div class="card-header">
+        <i class="bi bi-clock me-2"></i>Routine-Einstellungen
+    </div>
+    <div class="card-body">
+        <p class="text-secondary small mb-3">
+            Waehlen Sie, wie oft der Daemon automatisch einen Backup-Zyklus
+            ausfuehrt. Aenderungen werden sofort wirksam (ohne Neustart).
+        </p>
+        <form hx-post="/settings/save_interval"
+              hx-target="#interval-msg"
+              hx-swap="innerHTML">
+            <div class="row g-2 align-items-end">
+                <div class="col-auto">
+                    <label class="form-label mb-0">Intervall</label>
+                    <select name="interval" class="form-select">
+                        <option value="10" {{ 'selected' if routine_interval == 10 else '' }}>10 Min.</option>
+                        <option value="20" {{ 'selected' if routine_interval == 20 else '' }}>20 Min.</option>
+                        <option value="30" {{ 'selected' if routine_interval == 30 else '' }}>30 Min.</option>
+                        <option value="60" {{ 'selected' if routine_interval == 60 else '' }}>1 Std.</option>
+                        <option value="120" {{ 'selected' if routine_interval == 120 else '' }}>2 Std.</option>
+                        <option value="300" {{ 'selected' if routine_interval == 300 else '' }}>5 Std.</option>
+                    </select>
+                </div>
+                <div class="col-auto">
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-save me-1"></i>Speichern
+                    </button>
+                </div>
+            </div>
+        </form>
+        <div id="interval-msg" class="mt-3"></div>
+    </div>
+</div>
+
+<!-- Manueller Backup-Zyklus -->
+<div class="card mt-4">
+    <div class="card-header">
+        <i class="bi bi-play-circle me-2"></i>Manuelle Steuerung
+    </div>
+    <div class="card-body">
+        <button class="btn btn-primary"
+                hx-post="/api/trigger_engine"
+                hx-trigger="click"
+                hx-swap="innerHTML"
+                hx-target="#engine-status">
+            <i class="bi bi-lightning-charge me-1"></i>Manuellen Backup-Zyklus starten
+        </button>
+        <div id="engine-status" class="mt-3"></div>
+    </div>
+</div>
+
+<!-- Letzte Aktivitaeten (Live via HTMX) -->
+<div class="card mt-4">
+    <div class="card-header">
+        <i class="bi bi-clock-history me-2"></i>Letzte Aktivitaeten
+    </div>
+    <div class="card-body p-0">
+        <div id="log-container"
+             hx-get="/api/latest_logs"
+             hx-trigger="load"
+             hx-swap="innerHTML">
+            <p class="text-secondary small p-3 mb-0">Lade Aktivitaeten ...</p>
+        </div>
+    </div>
+</div>
+
+<!-- SSH Public Key -->
+<div class="card mt-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-key me-2"></i>Oeffentlicher SSH-Key</span>
+        <button type="button" id="copy-ssh-key-btn" class="btn btn-sm btn-outline-secondary">Kopieren</button>
+    </div>
+    <div class="card-body">
+        <pre id="ssh-key-block" class="key-block p-3 mb-0 text-success"
+             style="white-space: pre-wrap; word-break: break-all;"><code>{{ ssh_key }}</code></pre>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{# Robuster Kopier-Handler: Event-Delegation auf document, damit der Button
+   auch nach HTMX-Teil-Updates weiterhin funktioniert (kein inline-onclick,
+   das bei Re-Render verloren gehen wuerde). #}
+<script>
+(function () {
+    document.addEventListener('click', function (ev) {
+        var btn = ev.target.closest('#copy-ssh-key-btn');
+        if (!btn) { return; }
+        var block = document.getElementById('ssh-key-block');
+        if (!block) { return; }
+        var text = block.innerText;
+        var done = function () {
+            btn.textContent = 'Kopiert!';
+            setTimeout(function () { btn.textContent = 'Kopieren'; }, 2000);
+        };
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(done, done);
+        } else {
+            // Fallback fuer aeltere Browser
+            var ta = document.createElement('textarea');
+            ta.value = text;
+            document.body.appendChild(ta);
+            ta.select();
+            try { document.execCommand('copy'); } catch (e) {}
+            document.body.removeChild(ta);
+            done();
+        }
+    });
+})();
+</script>
+{% endblock %}
