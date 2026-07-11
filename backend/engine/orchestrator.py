@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SentinelBackup - Orchestrator Engine
 # Author: WrkDrvn
-# Version: 0.7.1
+# Version: 1.0.2
 #
 # Hintergrund-Daemon: Fuehrt pull-basierte Backup-Zyklen aus.
 #  PHASE 1: SSH-Flag-Check + rsync-Pull aller aktiven Server in den Cache.

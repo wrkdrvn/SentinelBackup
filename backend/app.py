@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SentinelBackup - Backend Application
 # Author: WrkDrvn
-# Version: 1.0.0
+# Version: 1.0.2
 #
 # Flask-Backend mit SQLAlchemy-Datenbank und HTMX-Fragment-Routen.
 # Gewartet von Gunicorn hinter Nginx.
@@ -24,7 +24,7 @@ from models import Server, NasConfig, BackupLog, SystemState
 
 from engine.orchestrator import run_full_cycle
 
-VERSION = "1.0.0"
+VERSION = "1.0.2"
 AUTHOR = "WrkDrvn"
 
 # App-Objekt MUSS "app" heissen (Gunicorn-Referenz: 'app:app')
