@@ -63,12 +63,12 @@
                         <div class="alert alert-warning mt-2 small mb-0 py-2">
                             <i class="bi bi-exclamation-triangle me-1"></i>
                             <strong>Synology-Hinweis:</strong> Der Befehl
-                            <code>sudo synoshutdown --shutdown</code> erfordert
+                            <code>sudo /usr/syno/sbin/synoshutdown --shutdown</code> erfordert
                             einen passwortlosen Sudoers-Eintrag auf der NAS.
                             Legen Sie dort (als admin via SSH) folgende Datei an:
                             <pre class="mb-1 mt-1 p-2 bg-dark text-light rounded"><code>sudo visudo -f /etc/sudoers.d/sentinelbackup</code></pre>
                             Inhalt:
-                            <pre class="mb-0 p-2 bg-dark text-light rounded"><code>{{ nas.user if nas else 'admin' }} ALL=(root) NOPASSWD: /usr/syno/sbin/synoshutdown</code></pre>
+                            <pre class="mb-0 p-2 bg-dark text-light rounded"><code>{{ nas.user if nas else 'admin' }} ALL=(root) NOPASSWD: /usr/syno/sbin/synoshutdown --shutdown</code></pre>
                         </div>
                     </div>
                 </div>

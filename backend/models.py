@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SentinelBackup - SQLAlchemy Models
 # Author: WrkDrvn
-# Version: 0.7.1
+# Version: 1.0.1
 #
 # Datenmodelle fuer Server und NAS-Konfiguration.
 
@@ -45,7 +45,7 @@ class NasConfig(db.Model):
     user = db.Column(db.String(128), nullable=False)
     password = db.Column(db.String(255), nullable=False)
     mount_point = db.Column(db.String(512), nullable=False, default="/mnt/nas")
-    ssh_shutdown_cmd = db.Column(db.String(255), nullable=False, default="sudo synoshutdown --shutdown")
+    ssh_shutdown_cmd = db.Column(db.String(255), nullable=False, default="sudo /usr/syno/sbin/synoshutdown --shutdown")
 
     def __repr__(self):
         return f"<NasConfig {self.ip}:{self.share_path}>"

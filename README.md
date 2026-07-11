@@ -114,7 +114,7 @@ Synology DSM uses **port 22** for SSH by default. Enter this in the NAS configur
 
 ### 2. Passwordless Shutdown
 
-The default shutdown command is `sudo synoshutdown --shutdown`. For this to work non-interactively over SSH, create a sudoers entry on the NAS:
+The default shutdown command is `sudo /usr/syno/sbin/synoshutdown --shutdown`. For this to work non-interactively over SSH, create a sudoers entry on the NAS:
 
 ```bash
 # SSH into the NAS as your admin user, then:
@@ -123,10 +123,10 @@ or
 sudo vim /etc/sudoers
 ```
 
-Add the following line (replace `admin` with your NAS SSH user):
+Add the following line (replace [username] with your NAS SSH user):
 
 ```
-[username] ALL=(root) NOPASSWD: /usr/syno/sbin/synoshutdown
+[username] ALL=(root) NOPASSWD: /usr/syno/sbin/synoshutdown --shutdown
 ```
 
 Save and exit. SentinelBackup can now shut down the NAS after each backup cycle without a password prompt.
