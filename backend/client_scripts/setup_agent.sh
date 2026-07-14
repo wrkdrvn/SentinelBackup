@@ -1,7 +1,7 @@
 #!/bin/bash
 # SentinelBackup - Agent Installer
 # Author: WrkDrvn
-# Version: 1.0.0
+# Version: 1.2.0
 #
 # Interaktiver Installer fuer Zielserver. Richtet den SentinelBackup Agent
 # unter /opt/sentinel_agent/ ein, schreibt Konfiguration in eine separate
@@ -79,14 +79,16 @@ echo "${BOLD}Bitte waehlen Sie den Servertyp:${RESET}"
 echo "  ${CYAN}1)${RESET} ISPConfig"
 echo "  ${CYAN}2)${RESET} MailCow"
 echo "  ${CYAN}3)${RESET} Docker / Portainer"
+echo "  ${CYAN}4)${RESET} Custom Server (Individuelle DBs, Ordner, Skripte)"
 echo
 while true; do
-    read -r -p "Auswahl [1-3]: " CHOICE
+    read -r -p "Auswahl [1-4]: " CHOICE
     case "${CHOICE}" in
         1) SERVER_TYPE="ispconfig"; break ;;
         2) SERVER_TYPE="mailcow"; break ;;
         3) SERVER_TYPE="docker"; break ;;
-        *) warn "Ungueltige Eingabe. Bitte 1, 2 oder 3." ;;
+        4) SERVER_TYPE="custom"; break ;;
+        *) warn "Ungueltige Eingabe. Bitte 1, 2, 3 oder 4." ;;
     esac
 done
 echo
@@ -148,6 +150,31 @@ case "${SERVER_TYPE}" in
             echo "COMPOSE_BASE=\"${COMPOSE_BASE}\""
         } > "${ENV_FILE}"
         ok "Konfiguration nach ${ENV_FILE} geschrieben."
+        ;;
+
+    custom)
+        echo
+        echo "${BOLD}Custom Agent Konfiguration${RESET}"
+        echo "Alle Werte werden in ${ENV_FILE} gespeichert."
+        echo
+
+        read -r -s -p "MySQL Root-Passwort (leer = kein DB-Backup): " CUSTOM_DB_PASS
+        echo
+        read -r -p "DB-Namen (Komma-getrennt, leer = keine DBs): " CUSTOM_DB_NAMES
+        read -r -p "Zu sichernde Verzeichnisse (Komma-getrennt, leer = keine): " CUSTOM_DIRS
+        read -r -p "Pre-Script Pfad (leer = keins): " CUSTOM_PRE_SCRIPT
+        read -r -p "Post-Script Pfad (leer = keins): " CUSTOM_POST_SCRIPT
+
+        {
+            echo "# SentinelBackup Agent Konfiguration (Custom)"
+            echo "# Autor: WrkDrvn - NICHT manuell aendern."
+            echo "DB_PASS=\"${CUSTOM_DB_PASS}\""
+            echo "DB_NAMES=\"${CUSTOM_DB_NAMES}\""
+            echo "DIRS=\"${CUSTOM_DIRS}\""
+            echo "PRE_SCRIPT=\"${CUSTOM_PRE_SCRIPT}\""
+            echo "POST_SCRIPT=\"${CUSTOM_POST_SCRIPT}\""
+        } > "${ENV_FILE}"
+        ok "Custom-Konfiguration nach ${ENV_FILE} geschrieben."
         ;;
 esac
 
@@ -299,6 +326,80 @@ cd "$DATA_DIR" && ls -t container_inventory_*.txt 2>/dev/null | tail -n +4 | xar
 # Flag setzen bei Erfolg
 touch "$FLAG_FILE"
 echo "[agent] Backup erfolgreich abgeschlossen."
+EOF
+        ;;
+
+    custom)
+        cat << 'EOF' > "${RUN_SCRIPT}"
+#!/bin/bash
+# SentinelBackup Agent - Custom Backup-Skript
+# Autor: WrkDrvn - vom Installer erzeugt, NICHT manuell aendern.
+set -e
+
+# Lade die Konfiguration
+source /opt/sentinel_agent/.env
+
+DATA_DIR="/opt/sentinel_agent/data"
+FLAG_FILE="/opt/sentinel_agent/.backup_done"
+MYSQL_CNF="/tmp/.sb_mysql.cnf"
+TIMESTAMP=$(date +%Y-%m-%d_%H-%M)
+
+# Alte Flag loeschen (Sicherheitsnetz)
+rm -f "$FLAG_FILE"
+
+# Alte Daten loeschen
+rm -rf "${DATA_DIR:?}"/*
+mkdir -p "$DATA_DIR"
+
+# --- Pre-Script ausfuehren ---
+if [ -n "$PRE_SCRIPT" ] && [ -x "$PRE_SCRIPT" ]; then
+    echo "[agent] Fuehre Pre-Script aus: $PRE_SCRIPT"
+    bash "$PRE_SCRIPT" || { echo "[agent] Pre-Script fehlgeschlagen!" >&2; exit 1; }
+fi
+
+# --- Datenbank-Sicherung ---
+if [ -n "$DB_PASS" ] && [ -n "$DB_NAMES" ]; then
+    echo "[agent] Sichere Datenbanken ..."
+    echo "[client]" > "$MYSQL_CNF"
+    echo "user=root" >> "$MYSQL_CNF"
+    echo "password=$DB_PASS" >> "$MYSQL_CNF"
+    chmod 600 "$MYSQL_CNF"
+
+    for db in $(echo "$DB_NAMES" | tr ',' ' '); do
+        echo "[agent] Dump: $db"
+        mysqldump --defaults-extra-file="$MYSQL_CNF" --single-transaction "$db" \
+            | gzip > "$DATA_DIR/db_${db}_${TIMESTAMP}.sql.gz"
+    done
+    rm -f "$MYSQL_CNF"
+fi
+
+# --- Verzeichnis-Sicherung ---
+if [ -n "$DIRS" ]; then
+    echo "[agent] Sichere Verzeichnisse ..."
+    for dir in $(echo "$DIRS" | tr ',' ' '); do
+        if [ -d "$dir" ]; then
+            dir_name=$(echo "$dir" | tr '/' '_' | sed 's/^_//')
+            echo "[agent] tar: $dir -> ${dir_name}.tar.gz"
+            tar -czpf "$DATA_DIR/${dir_name}_${TIMESTAMP}.tar.gz" "$dir" 2>/dev/null || true
+        else
+            echo "[agent] WARN: Verzeichnis nicht gefunden: $dir"
+        fi
+    done
+fi
+
+# --- Bereinige alte Backups (behalte letzte 3) ---
+echo "[agent] Bereinige alte Backups (behalte letzte 3) ..."
+cd "$DATA_DIR" && ls -t *.sql.gz *.tar.gz 2>/dev/null | tail -n +4 | xargs -r rm --
+
+# --- Post-Script ausfuehren ---
+if [ -n "$POST_SCRIPT" ] && [ -x "$POST_SCRIPT" ]; then
+    echo "[agent] Fuehre Post-Script aus: $POST_SCRIPT"
+    bash "$POST_SCRIPT" || { echo "[agent] Post-Script fehlgeschlagen!" >&2; }
+fi
+
+# Flag setzen bei Erfolg
+touch "$FLAG_FILE"
+echo "[agent] Custom Backup erfolgreich abgeschlossen."
 EOF
         ;;
 esac

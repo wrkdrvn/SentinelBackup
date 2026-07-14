@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SentinelBackup - Backend Application
 # Author: WrkDrvn
-# Version: 1.0.2
+# Version: 1.2.0
 #
 # Flask-Backend mit SQLAlchemy-Datenbank und HTMX-Fragment-Routen.
 # Gewartet von Gunicorn hinter Nginx.
@@ -10,6 +10,7 @@
 # HTML-Seite zurueck. Es werden ausschliesslich Partials/Snippets
 # geliefert, die HTMX in die Ziel-Container swappt.
 
+import os
 from flask import (
     Flask,
     jsonify,
@@ -24,7 +25,27 @@ from models import Server, NasConfig, BackupLog, SystemState
 
 from engine.orchestrator import run_full_cycle
 
-VERSION = "1.0.2"
+
+def get_version():
+    """Liest die zentrale Versionsnummer aus der VERSION-Datei.
+    Sucht im Backend-Verzeichnis, im uebergeordneten Verzeichnis und
+    im Installationsverzeichnis."""
+    _backend_dir = os.path.dirname(os.path.abspath(__file__))
+    for path in [
+        os.path.join(_backend_dir, "VERSION"),
+        os.path.join(os.path.dirname(_backend_dir), "VERSION"),
+        "/opt/sentinelbackup/VERSION",
+    ]:
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return f.read().strip()
+        except Exception:
+            continue
+    return "unknown"
+
+
+APP_VERSION = get_version()
+VERSION = APP_VERSION
 AUTHOR = "WrkDrvn"
 
 # App-Objekt MUSS "app" heissen (Gunicorn-Referenz: 'app:app')
@@ -115,6 +136,12 @@ def scripts():
         version=VERSION,
         author=AUTHOR,
     )
+
+
+@app.route("/settings")
+def settings():
+    """System-Einstellungsseite (Update, zukuenftig weitere Optionen)."""
+    return render_template("settings.html", version=APP_VERSION)
 
 
 # ---------------------------------------------------------------------------
@@ -421,10 +448,41 @@ def save_interval():
             '</button></div>')
 
 
+@app.route("/api/start_update", methods=["POST"])
+def start_update():
+    """Startet den Update-Prozess in einem Hintergrund-Thread, damit das
+    Web-UI nicht blockiert. Das update.sh Skript stoppt die Dienste,
+    fuehrt den rsync durch und startet alles wieder."""
+    import threading
+    import subprocess
+
+    target_version = request.form.get("target_version", "").strip()
+    if not target_version:
+        return ('<div class="alert alert-warning alert-dismissible fade show" '
+                'role="alert"><i class="bi bi-exclamation-triangle me-1"></i>'
+                'Keine Ziel-Version angegeben. '
+                '<button type="button" class="btn-close" data-bs-dismiss="alert">'
+                '</button></div>')
+
+    def _run_update():
+        subprocess.run(
+            ["bash", "/opt/sentinelbackup/update.sh", target_version],
+            capture_output=True, text=True, timeout=600,
+        )
+
+    threading.Thread(target=_run_update, daemon=True).start()
+
+    return ('<div class="alert alert-success alert-dismissible fade show" '
+            'role="alert"><i class="bi bi-check-circle me-1"></i>'
+            'Update-Prozess gestartet. Bitte laden Sie das Dashboard in 1 Minute neu. '
+            '<button type="button" class="btn-close" data-bs-dismiss="alert">'
+            '</button></div>')
+
+
 @app.route("/health")
 def health():
     """Health-Endpoint fuer Monitoring."""
-    return jsonify({"status": "ok", "version": "1.0.0"})
+    return jsonify({"status": "ok", "version": APP_VERSION})
 
 
 if __name__ == "__main__":

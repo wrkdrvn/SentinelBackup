@@ -2,12 +2,14 @@
 set -e
 
 # Author: WrkDrvn
-# Version: 1.0.0
 #
 # Installiert SentinelBackup auf einem frischen Ubuntu 24.04 LTS.
 # Muss als root ausgefuehrt werden.
 # Kopiert saemtliche Projektdateien (backend/ inkl. Templates, Partials,
 # Client-Skripte und CHANGELOG.md) nach /opt/sentinelbackup/.
+
+# Zentrale Versionsnummer aus VERSION-Datei lesen
+APP_VERSION="$(cat "$(cd "$(dirname "$0")" && pwd)/VERSION")"
 
 # --- Preflight --------------------------------------------------------------
 if [ "$(id -u)" -ne 0 ]; then
@@ -41,7 +43,7 @@ echo "|                                                               |"
 echo "+---------------------------------------------------------------+"
 echo ""
 echo ""
-echo "SentinelBackup initial installer Version 1.0.0"
+echo " >>> SentinelBackup v${APP_VERSION} - Installer <<<"
 echo ""
 echo ""
 # --- 1. Systempakete installieren ------------------------------------------
@@ -65,6 +67,7 @@ mkdir -p "${INSTALL_DIR}"
 echo "[3/8] Projektdateien nach ${INSTALL_DIR} kopieren ..."
 cp -r "${REPO_DIR}/backend" "${INSTALL_DIR}/backend"
 cp -f "${REPO_DIR}/CHANGELOG.md" "${INSTALL_DIR}/CHANGELOG.md"
+cp -f "${REPO_DIR}/VERSION" "${INSTALL_DIR}/VERSION"
 
 # --- 4. SSH ED25519 Key-Pair generieren ------------------------------------
 echo "[4/8] SSH ED25519 Key-Pair generieren ..."
@@ -183,7 +186,7 @@ SERVER_IP="$(hostname -I | awk '{print $1}')"
 
 echo ""
 echo "========================================"
-echo " SentinelBackup v0.6.5 Installation erfolgreich!"
+echo " SentinelBackup v${APP_VERSION} Installation erfolgreich!"
 echo "========================================"
 echo " Web-UI:        http://${SERVER_IP}/"
 echo " Health-Check:  http://${SERVER_IP}/health"

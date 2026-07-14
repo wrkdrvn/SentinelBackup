@@ -26,7 +26,7 @@ class Server(db.Model):
     active = db.Column(db.Boolean, nullable=False, default=True)
 
     # Erlaubte Typen: mailcow, ispconfig, docker, proxmox
-    VALID_TYPES = ("mailcow", "ispconfig", "docker", "proxmox")
+    VALID_TYPES = ("mailcow", "ispconfig", "docker", "proxmox", "custom")
 
     def __repr__(self):
         return f"<Server {self.hostname} ({self.server_type})>"
