@@ -182,7 +182,7 @@ def add_server():
     # Nur die Tabellen-Zeilen als Fragment zurueckgeben
     return render_template(
         "partials/server_rows.html",
-        servers=Server.query.all(),
+        servers=Server.query.order_by(Server.id.desc()).all(),
     )
 
 
@@ -201,7 +201,7 @@ def delete_server(server_id):
 
     return render_template(
         "partials/server_rows.html",
-        servers=Server.query.all(),
+        servers=Server.query.order_by(Server.id.desc()).all(),
     )
 
 
@@ -418,8 +418,18 @@ def trigger_engine():
 @app.route("/api/latest_logs")
 def latest_logs():
     """Liefert die letzten 5 BackupLog-Eintraege als HTML-Partial."""
-    logs = BackupLog.query.order_by(BackupLog.timestamp.desc()).limit(5).all()
-    return render_template("partials/latest_logs.html", logs=logs)
+    try:
+        logs = (
+            BackupLog.query
+            .options(db.joinedload(BackupLog.server))
+            .order_by(BackupLog.timestamp.desc())
+            .limit(5)
+            .all()
+        )
+        return render_template("partials/latest_logs.html", logs=logs)
+    except Exception as exc:
+        app.logger.error(f"Fehler beim Laden der Logs: {exc}")
+        return '<p class="text-danger small mb-0 p-3">Fehler beim Laden der Aktivitaeten.</p>'
 
 
 @app.route("/settings/save_interval", methods=["POST"])

@@ -65,10 +65,12 @@ class BackupLog(db.Model):
     timestamp = db.Column(
         db.DateTime,
         nullable=False,
-        default=datetime.now(timezone.utc),
+        default=lambda: datetime.now(timezone.utc),
     )
     status = db.Column(db.String(16), nullable=False, default="skipped")
     message = db.Column(db.Text, nullable=True)
+
+    server = db.relationship("Server", backref="logs")
 
     # Erlaubte Status: success, failed, skipped
     VALID_STATUSES = ("success", "failed", "skipped")

@@ -6,9 +6,9 @@
     {% for log in logs %}
     <li class="list-group-item d-flex justify-content-between align-items-center">
         <span>
-            <small class="text-secondary me-2">{{ log.timestamp.strftime('%Y-%m-%d %H:%M') }}</small>
-            {% if log.server_id %}
-                <span class="text-body">Server ID: {{ log.server_id }}</span>
+            <small class="text-secondary me-2">{{ log.timestamp.strftime('%Y-%m-%d %H:%M UTC') }}</small>
+            {% if log.server %}
+                <span class="text-body">{{ log.server.hostname }}</span>
             {% else %}
                 <span class="text-body">System</span>
             {% endif %}

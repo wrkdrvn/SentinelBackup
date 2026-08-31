@@ -137,14 +137,20 @@ def release_lock():
 # ---------------------------------------------------------------------------
 def _log(server_id, status, message=""):
     """Schreibt einen BackupLog-Eintrag in die DB.
-    Muss innerhalb eines aktiven Flask app_context aufgerufen werden."""
-    entry = BackupLog(
-        server_id=server_id,
-        status=status,
-        message=message,
-    )
-    db.session.add(entry)
-    db.session.commit()
+    Muss innerhalb eines aktiven Flask app_context aufgerufen werden.
+    Fehler werden abgefangen, damit ein Log-Fehler den Zyklus nicht
+    zum Absturz bringt."""
+    try:
+        entry = BackupLog(
+            server_id=server_id,
+            status=status,
+            message=message,
+        )
+        db.session.add(entry)
+        db.session.commit()
+    except Exception as exc:
+        db.session.rollback()
+        logger.error(f"DB-Log fehlgeschlagen: {exc}")
 
 
 # ---------------------------------------------------------------------------

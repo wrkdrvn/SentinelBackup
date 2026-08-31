@@ -32,6 +32,7 @@ def init_db(app):
             cur.execute("PRAGMA journal_mode=WAL;")
             cur.execute("PRAGMA synchronous=NORMAL;")
             cur.execute("PRAGMA busy_timeout=5000;")
+            cur.execute("PRAGMA foreign_keys=ON;")
             cur.close()
 
         # Tabellen anlegen, falls noch nicht vorhanden
