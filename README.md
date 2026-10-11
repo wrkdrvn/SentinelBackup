@@ -58,6 +58,11 @@ Runs comfortably on **1 vCPU / 2 GB RAM**.
 - **Synology-first** — enforces SMB3 protocol, supports non-standard SSH ports (default 2022), and uses `synoshutdown` for safe passwordless shutdown.
 - **Forensic logging** — every `rsync` command, SSH check, cache size, and mount operation is logged with full detail to `/var/log/sentinelbackup/engine.log` (rotating, 5 MB × 3).
 - **Built-in diagnostics** — the WebUI includes a 3-step NAS connection test (Ping → Port 445 → SMB login) with translated, actionable error hints.
+- **Server editing** — servers can be edited in-place from the list (no delete/re-create dance).
+- **Backup history & stats** — `/logs` shows a 30-day success-rate dashboard, status filters and a paginated run history.
+- **NAS retention** — configurable retention (days) cleans old backups on the NAS after each successful push; only SentinelBackup's own server folders are touched.
+- **Matrix failure alerts** — get a Matrix message when a backup cycle fails (with cooldown), configured right in the settings page.
+- **Config versioning** — opt-in per server: pulled configs are committed to a local git repo each cycle and mirrored to the NAS as `_config_repo/`.
 - **Configurable routine interval** — choose 10 min to 5 h from the dashboard dropdown. Changes take effect immediately, no service restart.
 - **Manual trigger** — kick off a backup cycle on demand from the WebUI.
 

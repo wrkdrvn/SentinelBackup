@@ -49,6 +49,9 @@ LOG_DIR = "/var/log/sentinelbackup"
 LOG_FILE = os.path.join(LOG_DIR, "engine.log")
 CIFS_CREDS_FILE = "/tmp/sbtcifscreds"
 UPDATE_SCRIPT = "/opt/sentinelbackup/update.sh"
+# Lokales Git-Repository fuer getrackte Config-Backups (Feature: Configs
+# versionieren + auf die NAS ziehen)
+GIT_REPO_DIR = "/opt/sentinelbackup/backup_repo/"
 NAS_MOUNT_POINT = "/mnt/nas"   # Fallback, falls in der DB nichts konfiguriert
 NAS_BOOT_TIMEOUT_SEC = 300
 NAS_POLL_INTERVAL_SEC = 5
@@ -484,6 +487,101 @@ def shutdown_nas(nas):
 
 
 # ---------------------------------------------------------------------------
+# Config-Git-Repo (Feature: Configs versionieren + auf die NAS ziehen)
+# ---------------------------------------------------------------------------
+def _sync_config_git():
+    """Synchronisiert die gezogenen Configs aller git-Tracking-Server in
+    ein lokales Git-Repository und committet Aenderungen. So entsteht pro
+    Zyklus eine Versionshistorie, aus der sich Configs zurueckholen lassen.
+    Fehler duerfen den Backup-Zyklus nie beeintraechtigen."""
+    try:
+        tracked = Server.query.filter_by(active=True, git_track=True).all()
+        if not tracked:
+            return
+
+        os.makedirs(GIT_REPO_DIR, exist_ok=True)
+        if not os.path.isdir(os.path.join(GIT_REPO_DIR, ".git")):
+            result = subprocess.run(
+                ["git", "init"], cwd=GIT_REPO_DIR,
+                capture_output=True, text=True, timeout=30,
+            )
+            if result.returncode != 0:
+                logger.error(f"git init fehlgeschlagen: {result.stderr.strip()}")
+                return
+            logger.info(f"Git-Config-Repo initialisiert: {GIT_REPO_DIR}")
+
+        synced = 0
+        for srv in tracked:
+            dirname = srv.hostname.replace(" ", "_")
+            src = os.path.join(CACHE_DIR, dirname) + "/"
+            if not os.path.isdir(src):
+                continue
+            dest = os.path.join(GIT_REPO_DIR, dirname)
+            result = subprocess.run(
+                ["rsync", "-a", "--delete", src, dest + "/"],
+                capture_output=True, text=True, timeout=600,
+            )
+            if result.returncode != 0:
+                logger.error(f"Git-Sync fuer {srv.hostname} fehlgeschlagen: "
+                             f"{result.stderr.strip()}")
+                continue
+            synced += 1
+
+        if synced == 0:
+            return
+
+        subprocess.run(
+            ["git", "-C", GIT_REPO_DIR, "add", "-A"],
+            capture_output=True, text=True, timeout=120,
+        )
+        status = subprocess.run(
+            ["git", "-C", GIT_REPO_DIR, "status", "--porcelain"],
+            capture_output=True, text=True, timeout=60,
+        )
+        if not status.stdout.strip():
+            logger.debug("Git-Config-Repo: keine Aenderungen, Commit uebersprungen.")
+            return
+
+        stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        commit = subprocess.run(
+            ["git", "-C", GIT_REPO_DIR,
+             "-c", "user.name=SentinelBackup",
+             "-c", "user.email=sentinelbackup@localhost",
+             "commit", "-m", f"Backup-Zyklus {stamp}"],
+            capture_output=True, text=True, timeout=120,
+        )
+        if commit.returncode == 0:
+            logger.info("Git-Config-Repo: Aenderungen committet "
+                        f"({stamp}).")
+        else:
+            logger.error(f"git commit fehlgeschlagen: {commit.stderr.strip()}")
+    except Exception as exc:  # noqa: BLE001 - Tracking darf den Zyklus nicht killen
+        logger.error(f"Git-Config-Sync fehlgeschlagen: {exc}")
+
+
+def _push_config_repo_to_nas(nas):
+    """Zieht das Config-Git-Repo nach erfolgreichem Push mit auf die NAS
+    (_config_repo/), damit die Versionshistorie auch ausserhalb der VM
+    liegt. Nur wenn ein Repo existiert."""
+    if not os.path.isdir(os.path.join(GIT_REPO_DIR, ".git")):
+        return
+    dest = os.path.join(_mount_point(nas), "_config_repo")
+    try:
+        os.makedirs(dest, exist_ok=True)
+        result = subprocess.run(
+            ["rsync", "-a", "--delete", GIT_REPO_DIR + "/", dest + "/"],
+            capture_output=True, text=True, timeout=600,
+        )
+        if result.returncode == 0:
+            logger.info(f"Git-Config-Repo auf die NAS gespiegelt: {dest}")
+        else:
+            logger.error(f"Spiegelung des Git-Repos auf die NAS fehlgeschlagen: "
+                         f"{result.stderr.strip()}")
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as exc:
+        logger.error(f"Git-Repo-NAS-Push fehlgeschlagen: {exc}")
+
+
+# ---------------------------------------------------------------------------
 # NAS-Retention (Feature: alte Backups automatisch bereinigen)
 # ---------------------------------------------------------------------------
 def _apply_nas_retention(nas):
@@ -660,6 +758,10 @@ def run_full_cycle(flask_app):
                     logger.error(f"Server {srv.hostname}: rsync pull fehlgeschlagen (RC={rc}).")
                     _log(srv.id, "failed", f"rsync pull RC={rc}")
 
+            # Config-Git-Repo aktualisieren, solange die Daten noch im
+            # Cache liegen (Phase 2 leert ihn erst nach erfolgreichem Push).
+            _sync_config_git()
+
             # --- PHASE 2: NAS-Aktionen (nur wenn Cache nicht leer) -----------
             if not _cache_has_data():
                 logger.info("Cache ist leer - keine NAS-Aktionen erforderlich.")
@@ -697,6 +799,8 @@ def run_full_cycle(flask_app):
                                     # Retention: erst NACH erfolgreichem Push,
                                     # solange die Share noch gemountet ist.
                                     _apply_nas_retention(nas)
+                                    # Config-Git-Repo mit auf die NAS ziehen
+                                    _push_config_repo_to_nas(nas)
                                 else:
                                     logger.error("rsync push auf NAS fehlgeschlagen - Cache NICHT geloescht.")
                                     _log(None, "failed", "rsync push auf NAS fehlgeschlagen.")

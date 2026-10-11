@@ -369,3 +369,35 @@ def test_notify_is_skipped_when_disabled(client):
     from datetime import datetime, timezone
     with app.app_context():
         assert orch._notify_if_failed(datetime.now(timezone.utc)) is None
+
+
+# ---------------------------------------------------------------------------
+# Feature: Config-Git-Tracking (Server-Feld)
+# ---------------------------------------------------------------------------
+def test_server_git_track_checkbox(client):
+    payload = {
+        "hostname": "gitserver",
+        "ip": "10.0.0.77",
+        "ssh_user": "root",
+        "ssh_port": "22",
+        "backup_path": "/opt/sentinel_agent/data/",
+        "flag_path": "/opt/sentinel_agent/.backup_done",
+        "server_type": "docker",
+        "active": "on",
+        "git_track": "on",
+    }
+    client.post("/servers/add", data=payload)
+    with app.app_context():
+        from models import Server
+        server = Server.query.filter_by(hostname="gitserver").first()
+        assert server is not None
+        assert server.git_track is True
+        server_id = server.id
+
+    # Edit OHNE git_track-Feld (Checkbox abgewaehlt) -> Flag faellt
+    payload.pop("git_track")
+    payload["hostname"] = "gitserver"
+    client.post(f"/servers/edit/{server_id}", data=payload)
+    with app.app_context():
+        from models import Server
+        assert db.session.get(Server, server_id).git_track is False

@@ -203,3 +203,80 @@ def test_apply_nas_retention_disabled_does_nothing(client):
 
     import shutil
     shutil.rmtree(base, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# Feature: Config-Git-Repo
+# ---------------------------------------------------------------------------
+def test_sync_config_git_creates_repo_and_commits(client, monkeypatch):
+    """Getrackte Server landen im Git-Repo, Aenderungen erzeugen Commits,
+    un-getrackte Server bleiben draussen, ohne Aenderung kein Commit."""
+    import shutil
+    import subprocess
+
+    base = tempfile.mkdtemp(prefix="sentinel_git_")
+    cache = os.path.join(base, "cache")
+    repo = os.path.join(base, "backup_repo")
+    monkeypatch.setattr(orch, "CACHE_DIR", cache + "/")
+    monkeypatch.setattr(orch, "GIT_REPO_DIR", repo + "/")
+
+    with app.app_context():
+        from models import Server
+        db.session.add(Server(hostname="cfg01", ip="10.0.0.3", backup_path="/x",
+                              flag_path="/y", server_type="docker", git_track=True))
+        db.session.add(Server(hostname="nogit01", ip="10.0.0.4", backup_path="/x",
+                              flag_path="/y", server_type="docker", git_track=False))
+        db.session.commit()
+
+    cfg_dir = os.path.join(cache, "cfg01")
+    os.makedirs(cfg_dir)
+    cfg_file = os.path.join(cfg_dir, "docker-compose.yml")
+    with open(cfg_file, "w", encoding="utf-8") as fh:
+        fh.write("services:\n  web:\n    image: nginx\n")
+
+    def _commit_count():
+        result = subprocess.run(
+            ["git", "-C", repo, "rev-list", "--count", "HEAD"],
+            capture_output=True, text=True,
+        )
+        return int(result.stdout.strip() or 0)
+
+    try:
+        with app.app_context():
+            orch._sync_config_git()
+
+        assert os.path.exists(os.path.join(repo, "cfg01", "docker-compose.yml"))
+        assert _commit_count() == 1
+
+        # Kein Aenderung -> kein Commit
+        with app.app_context():
+            orch._sync_config_git()
+        assert _commit_count() == 1
+
+        # Aenderung -> zweiter Commit
+        with open(cfg_file, "a", encoding="utf-8") as fh:
+            fh.write("  db:\n    image: postgres\n")
+        with app.app_context():
+            orch._sync_config_git()
+        assert _commit_count() == 2
+
+        # Nicht getrackter Server landet NICHT im Repo
+        assert not os.path.exists(os.path.join(repo, "nogit01"))
+    finally:
+        shutil.rmtree(base, ignore_errors=True)
+
+
+def test_push_config_repo_requires_git_dir(client, monkeypatch):
+    """Ohne Repo passiert gar nichts (kein Absturz, kein Mount-Zugriff)."""
+    import shutil
+    base = tempfile.mkdtemp(prefix="sentinel_git2_")
+    monkeypatch.setattr(orch, "GIT_REPO_DIR", os.path.join(base, "nope"))
+
+    class Nas:
+        mount_point = os.path.join(base, "mnt")
+        retention_days = 0
+
+    os.makedirs(Nas.mount_point, exist_ok=True)
+    orch._push_config_repo_to_nas(Nas())  # darf keine Exception werfen
+    assert os.listdir(Nas.mount_point) == []
+    shutil.rmtree(base, ignore_errors=True)

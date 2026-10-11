@@ -129,6 +129,8 @@ def _server_fields(data, active_default="on"):
         "flag_path": data.get("flag_path", "/var/run/backup_done").strip(),
         "server_type": server_type,
         "active": data.get("active", active_default) == "on",
+        # Checkbox-Semantik: nur an, wenn das Feld mitkommt (off by default)
+        "git_track": data.get("git_track") == "on",
     }
 
 

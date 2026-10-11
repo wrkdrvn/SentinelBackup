@@ -90,6 +90,7 @@ def init_db(app):
         # --- Migrationen: NAS-Retention + Matrix-Benachrichtigung ----------
         _migrations = [
             "ALTER TABLE nas_config ADD COLUMN retention_days INTEGER DEFAULT 0",
+            "ALTER TABLE servers ADD COLUMN git_track BOOLEAN DEFAULT 0",
             "ALTER TABLE system_state ADD COLUMN notify_enabled BOOLEAN DEFAULT 0",
             "ALTER TABLE system_state ADD COLUMN matrix_homeserver VARCHAR(255) DEFAULT ''",
             "ALTER TABLE system_state ADD COLUMN matrix_room_id VARCHAR(255) DEFAULT ''",

@@ -352,8 +352,32 @@ echo "[agent] Sichere Container-Inventory ..."
 docker ps --format '{{.Names}}\t{{.Image}}\t{{.Status}}' \
     > "$OUT_DIR/container_inventory_$TIMESTAMP.txt" 2>/dev/null || true
 
+# Volume-Inventar sichern (Restauration braucht die Volume-Namen)
+echo "[agent] Sichere Docker-Volume-Inventar ..."
+docker volume ls --format '{{.Name}}' \
+    > "$OUT_DIR/docker_volumes_$TIMESTAMP.txt" 2>/dev/null || true
+
+# Aufgeloeste Stack-Konfiguration sichern: `docker compose config` wertet
+# .env-Variablen auf, sodass der Stack auch ohne Original-Umgebung
+# rekonstruierbar ist.
+echo "[agent] Sichere aufgeloeste Stack-Konfigurationen ..."
+mkdir -p "$OUT_DIR/resolved_configs"
+echo "$FOUND" | while IFS= read -r f; do
+    case "$f" in
+        *docker-compose.yml|*docker-compose.yaml)
+            rel="${f#${COMPOSE_BASE}/}"
+            dest="$OUT_DIR/resolved_configs/${rel}.resolved"
+            mkdir -p "$(dirname "$dest")"
+            (cd "$(dirname "$f")" && \
+                docker compose -f "$(basename "$f")" config) \
+                > "$dest" 2>/dev/null || rm -f "$dest"
+            ;;
+    esac
+done
+
 echo "[agent] Bereinige alte Backups (behalte letzte 3) ..."
 cd "$OUT_DIR" && ls -t container_inventory_*.txt 2>/dev/null | tail -n +4 | xargs -r rm --
+cd "$OUT_DIR" && ls -t docker_volumes_*.txt 2>/dev/null | tail -n +4 | xargs -r rm --
 
 # Atomarer Swap: neues Backup erst dann sichtbar, wenn es fertig ist.
 if [ -d "$DATA_DIR" ]; then

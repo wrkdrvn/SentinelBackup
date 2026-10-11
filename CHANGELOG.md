@@ -8,10 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Docker/Portainer-Stacks erweitert:** Der Agent sichert jetzt zusatzlich das Volume-Inventar (`docker volume ls`) und die aufgeloesten Stack-Konfigurationen (`docker compose config`, inkl. .env-Aufloesung) unter `resolved_configs/`.
+- **Configs im Git-Repository:** Neues Server-Feld "Configs ins Git-Repo versionieren". Die Engine spiegelt die gezogenen Configs getrackter Server nach `/opt/sentinelbackup/backup_repo/` und committet bei jeder Inhaltsaenderung (Versionshistorie, Zurueckholbar via `git log`/`git checkout`). Fehler duerfen den Zyklus nicht beeintraechtigen.
+- **Config-Repo auf die NAS:** Nach erfolgreichem Push wird das Git-Repo als `_config_repo/` auf den Share gespiegelt (Versionshistorie auch ausserhalb der VM).
 - **Server bearbeiten:** Neue Edit-Funktion in der Server-Liste (Stift-Icon), Modal mit bestehenden Werten, geteilte Validierung mit "Hinzufuegen".
 - **Backup-Verlauf & Statistik:** Neue Seite `/logs` mit 30-Tage-Statistik (Laeufe, Erfolgsquote, Fehler, Uebersprungen), Statusfilter und paginierter History (50/Seite); Nav-Eintrag "Verlauf".
 - **NAS-Retention:** Aufbewahrungsfrist in Tagen in der NAS-Konfiguration (0 = unbegrenzt). Die Engine Raeumt nach erfolgreichem Push alte Dateien der konfigurierten Server-Ordner auf der NAS auf - fremde Daten auf dem Share bleiben unangetastet (realpath-Schutz).
 - **Fehler-Alarm (Matrix):** Einstellungsseite bekommt Benachrichtigungs-Formular (Homeserver, Room, Access-Token, Cooldown). Die Engine sendet bei fehlgeschlagenen Zyklen eine Matrix-Nachricht (stdlib urllib, keine neuen Abhaengigkeiten), inkl. Cooldown gegen Alarm-Flut.
+- **Installations-Abhaengigkeit:** `git` wird ab jetzt mitinstalliert (benoetigt fuer das Config-Repo).
 
 ### Fixed
 - Critical: Test-Suite war nicht ausfuehrbar (Datenbankpfad hartcodiert, Absturz bei Import ohne /opt-Verzeichnis). DB-Pfad jetzt via `SENTINEL_DB_PATH` ueberschreibbar; 24 Tests laufen gruen.

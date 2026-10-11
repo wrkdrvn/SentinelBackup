@@ -54,6 +54,7 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y \
     python3-venv \
     python3-pip \
     rsync \
+    git \
     wakeonlan \
     cifs-utils \
     smbclient \

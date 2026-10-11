@@ -24,6 +24,10 @@ class Server(db.Model):
     flag_path = db.Column(db.String(512), nullable=False, default="/var/run/backup_done")
     server_type = db.Column(db.String(32), nullable=False, default="docker")
     active = db.Column(db.Boolean, nullable=False, default=True)
+    # Config-Git-Tracking: Die Engine pflegt fuer aktive Server mit
+    # git_track=True eine Versionshistorie der gezogenen Configs
+    # (/opt/sentinelbackup/backup_repo) und legt das Repo auf die NAS.
+    git_track = db.Column(db.Boolean, nullable=False, default=False)
 
     # Erlaubte Typen: mailcow, ispconfig, docker, proxmox
     VALID_TYPES = ("mailcow", "ispconfig", "docker", "proxmox", "custom")
