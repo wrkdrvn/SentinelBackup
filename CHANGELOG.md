@@ -5,6 +5,23 @@ All notable changes to SentinelBackup are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- Critical: Test-Suite war nicht ausfuehrbar (Datenbankpfad hartcodiert, Absturz bei Import ohne /opt-Verzeichnis). DB-Pfad jetzt via `SENTINEL_DB_PATH` ueberschreibbar; 24 Tests laufen gruen.
+- Critical: Update-Funktion war defekt (update.sh verlangt root, lief als www-data; UI meldete trotzdem Erfolg). Jetzt DB-Trigger-Design: WebUI validiert das Versionsformat und traegt `update_pending` ein, der root-Daemon startet das Update in eigener systemd-Transient-Unit (keine sudoers-Erweiterung noetig).
+- Critical: Lock-Endlosschleife entfernt (`sys.exit` bei bestehendem Lock toetete den Daemon -> systemd-Neustart-Loop). Veraltete Locks (Prozess tot) werden jetzt erkannt und uebernommen, lebende Locks blockieren sauber ohne Prozess-Exit.
+- NAS-Mount-Point aus der Datenbank wird jetzt verwendet (WebUI-Einstellung war voellig wirkungslos, Engine nutzte Konstante /mnt/nas).
+- MailCow-Agent ignorierte den beim Setup eingegebenen Pfad (hartcodiert /opt/mailcow-dockerized, .env wurde nicht geladen).
+- Custom-Agent: Word-Splitting bei DB-Namen/Verzeichnissen mit Leerzeichen (jetzt Arrays mit Trim statt `tr ',' ' '`).
+- Alle Agent-Typen: Datenverlust beim fehlgeschlagenen Backup verhindert - jetzt wird in `${DATA_DIR}.new` gebaut und erst bei Erfolg atomar getauscht (das alte Ueberbleibsel-Verhalten loeschte die letzte Sicherung VOR dem neuen Lauf).
+- `save_interval`/`trigger_engine` meldeten Erfolg ohne vorhandene SystemState-Zeile (wird jetzt automatisch angelegt).
+- Versionsangaben synchronisiert (Agent-Banner, Orchestrator-/Model-/DB-Header, README-Badge -> 1.2.0); Tests lesen die VERSION-Datei dynamisch statt hartcodiert.
+- KNOWN_ISSUES #1 (Formular-Werte bleiben) als behoben verifiziert (Reset-Handler seit 5ec72b3).
+
+### Removed
+- Tote Templates `_server_modal.html` und `_servers_table.html` (referenzierten nie existierende /api/servers-Routen).
+
 ## [1.2.0] - 2026-07-07
 
 ### Added

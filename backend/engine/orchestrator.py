@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SentinelBackup - Orchestrator Engine
 # Author: WrkDrvn
-# Version: 1.0.2
+# Version: 1.2.0
 #
 # Hintergrund-Daemon: Fuehrt pull-basierte Backup-Zyklen aus.
 #  PHASE 1: SSH-Flag-Check + rsync-Pull aller aktiven Server in den Cache.
@@ -44,9 +44,18 @@ SSH_KEY = "/root/.ssh/id_ed25519"
 LOG_DIR = "/var/log/sentinelbackup"
 LOG_FILE = os.path.join(LOG_DIR, "engine.log")
 CIFS_CREDS_FILE = "/tmp/sbtcifscreds"
-NAS_MOUNT_POINT = "/mnt/nas"
+UPDATE_SCRIPT = "/opt/sentinelbackup/update.sh"
+NAS_MOUNT_POINT = "/mnt/nas"   # Fallback, falls in der DB nichts konfiguriert
 NAS_BOOT_TIMEOUT_SEC = 300
 NAS_POLL_INTERVAL_SEC = 5
+
+
+def _mount_point(nas):
+    """Liefert den KONFIGURIERTEN Mount-Point aus der DB (nas.mount_point).
+    Fallback: Standard /mnt/nas. Frueher wurde die Konstante verwendet und
+    die WebUI-Einstellung war wirkungslos."""
+    mp = (getattr(nas, "mount_point", "") or "").strip().rstrip("/")
+    return mp or NAS_MOUNT_POINT
 
 
 # ---------------------------------------------------------------------------
@@ -104,16 +113,49 @@ logger = logging.getLogger("SentinelBackup")
 # Locking
 # ---------------------------------------------------------------------------
 def acquire_lock():
-    """Erstellt die Lock-Datei. Bricht ab, falls sie bereits existiert."""
+    """Erstellt die Lock-Datei. Gibt True bei Erfolg zurueck, False wenn
+    ein anderer Zyklus laeuft. Veraltete Locks (Crash, Prozess tot) werden
+    erkannt und uebernommen - ein toter Prozess darf den Daemon nicht in
+    eine Endlosschleife stoeren (frueher: sys.exit -> systemd-Neustart-Loop)."""
     if os.path.exists(LOCK_FILE):
-        logger.error("Lock-Datei existiert - ein anderer Zyklus laeuft. Abbruch.")
-        sys.exit(1)
+        pid = None
+        try:
+            with open(LOCK_FILE, "r", encoding="utf-8") as fh:
+                pid = int(fh.read().strip())
+        except (OSError, ValueError):
+            pid = None
+
+        if pid is not None:
+            try:
+                os.kill(pid, 0)
+                alive = True
+            except ProcessLookupError:
+                alive = False
+            except PermissionError:
+                alive = True
+            except OSError:
+                alive = False
+            if alive:
+                logger.error(f"Lock existiert (PID {pid}) - ein anderer Zyklus "
+                             f"laeuft. Abbruch.")
+                return False
+            logger.warning(f"Veraltete Lock-Datei (PID {pid} existiert nicht) - "
+                           f"ueberschreibe.")
+        else:
+            logger.warning("Lock-Datei ohne gueltige PID - ueberschreibe.")
+        try:
+            os.remove(LOCK_FILE)
+        except OSError as exc:
+            logger.error(f"Konnte veraltete Lock-Datei nicht entfernen: {exc}")
+            return False
+
     try:
         with open(LOCK_FILE, "w", encoding="utf-8") as fh:
             fh.write(str(os.getpid()))
     except OSError as exc:
         logger.error(f"Konnte Lock-Datei nicht schreiben: {exc}")
-        sys.exit(1)
+        return False
+    return True
 
 
 def lock_exists(path=None):
@@ -338,12 +380,13 @@ def remove_cifs_creds():
 
 def mount_nas(nas):
     """Mountet die NAS-Share per CIFS und validiert den Mountpunkt."""
-    logger.info(f"Mounte NAS-Share {nas.share_path} unter {NAS_MOUNT_POINT} ...")
+    mp = _mount_point(nas)
+    logger.info(f"Mounte NAS-Share {nas.share_path} unter {mp} ...")
     cmd = [
         "mount",
         "-t", "cifs",
         nas.share_path,
-        NAS_MOUNT_POINT,
+        mp,
         "-o", "credentials={},vers=3.0,iocharset=utf8".format(CIFS_CREDS_FILE),
     ]
     try:
@@ -357,12 +400,12 @@ def mount_nas(nas):
     logger.info("Mount-Befehl ausgefuehrt. Validiere Mountpunkt ...")
 
     # SEHR WICHTIG: mountpoint -q prueft, ob es wirklich ein Mount ist.
-    mp = subprocess.run(
-        ["mountpoint", "-q", NAS_MOUNT_POINT],
+    mp_check = subprocess.run(
+        ["mountpoint", "-q", mp],
         capture_output=True, text=True, timeout=10,
     )
-    if mp.returncode != 0:
-        logger.error("mountpoint -q: /mnt/nas ist KEIN gueltiger Mountpunkt! "
+    if mp_check.returncode != 0:
+        logger.error(f"mountpoint -q: {mp} ist KEIN gueltiger Mountpunkt! "
                      "Mount ist fehlgeschlagen obwohl RC=0.")
         return False
 
@@ -370,19 +413,21 @@ def mount_nas(nas):
     return True
 
 
-def unmount_nas():
-    """Unmountet die NAS-Share."""
-    logger.info(f"Unmounte {NAS_MOUNT_POINT} ...")
-    cmd = ["umount", NAS_MOUNT_POINT]
+def unmount_nas(nas=None):
+    """Unmountet die NAS-Share (konfigurierter Mount-Point)."""
+    mp = _mount_point(nas) if nas is not None else NAS_MOUNT_POINT
+    logger.info(f"Unmounte {mp} ...")
+    cmd = ["umount", mp]
     try:
         subprocess.run(cmd, capture_output=True, text=True, timeout=60)
     except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
         logger.error(f"umount fehlgeschlagen: {exc}")
 
 
-def push_to_nas():
+def push_to_nas(nas=None):
     """Pusht das Cache-Verzeichnis per rsync auf das NAS.
     Gibt True bei Erfolg zurueck."""
+    mp = _mount_point(nas) if nas is not None else NAS_MOUNT_POINT
     size_mb = _cache_size_mb()
     logger.info(f"NAS Push: Lokaler Cache enthaelt {size_mb:.2f} MB Daten.")
 
@@ -391,7 +436,7 @@ def push_to_nas():
         "-avz",
         "--stats",
         CACHE_DIR,
-        NAS_MOUNT_POINT + "/",
+        mp + "/",
     ]
     logger.info(f"AUSFUEHRUNG RSYNC: {' '.join(cmd)}")
     try:
@@ -443,7 +488,10 @@ def run_full_cycle(flask_app):
 
     # --- PHASE 1: Vorbereitung & Server-Pull -------------------------------
     logger.info("=== Starte neuen Backup-Zyklus ===")
-    acquire_lock()
+    if not acquire_lock():
+        logger.warning("Zyklus uebersprungen - Lock ist nicht frei "
+                       "(anderer Zyklus laeuft).")
+        return
 
     try:
         with flask_app.app_context():
@@ -508,16 +556,16 @@ def run_full_cycle(flask_app):
                         # Credentials erstellen
                         write_cifs_creds(nas)
                         try:
-                            os.makedirs(NAS_MOUNT_POINT, exist_ok=True)
+                            os.makedirs(_mount_point(nas), exist_ok=True)
 
                             # Mounten + Validierung
                             if not mount_nas(nas):
                                 logger.error("CIFS mount fehlgeschlagen - springe zu Cleanup.")
                                 _log(None, "failed", "CIFS mount fehlgeschlagen.")
-                                unmount_nas()
+                                unmount_nas(nas)
                             else:
                                 # NAS Push
-                                if push_to_nas():
+                                if push_to_nas(nas):
                                     _clear_cache_contents()
                                     logger.info("Cache nach erfolgreichem Push geleert.")
                                     _log(None, "success", "rsync push auf NAS erfolgreich.")
@@ -525,7 +573,7 @@ def run_full_cycle(flask_app):
                                     logger.error("rsync push auf NAS fehlgeschlagen - Cache NICHT geloescht.")
                                     _log(None, "failed", "rsync push auf NAS fehlgeschlagen.")
 
-                                unmount_nas()
+                                unmount_nas(nas)
                         finally:
                             remove_cifs_creds()
                             logger.info("CIFS-Credentials entfernt.")
@@ -544,6 +592,61 @@ def run_full_cycle(flask_app):
 
 
 # ---------------------------------------------------------------------------
+# Update-Uebergabe (WebUI -> DB -> root-Daemon -> systemd-Transient-Unit)
+# ---------------------------------------------------------------------------
+def _launch_update(version):
+    """Startet update.sh in EIGENER systemd-Transient-Unit.
+    WARUM systemd-run: update.sh stoppt 'sentinelbackup-engine'. Wuerde der
+    Daemon das Skript direkt als Kind ausfuehren, waere der Stop des Dienstes
+    gleichzeitig das Ende der eigenen cgroup - und damit der Tod des laufen-
+    den Updates. Die Transient-Unit laeuft unabhaengig vom Daemon und
+    startet am Ende beide Dienste neu.
+    Gibt True zurueck, wenn das Update gestartet wurde."""
+    if not os.path.isfile(UPDATE_SCRIPT):
+        logger.error(f"Update-Skript fehlt: {UPDATE_SCRIPT} - Update nicht gestartet.")
+        return False
+
+    unit = f"sentinelbackup-update-{int(time.time())}"
+    cmd = [
+        "systemd-run",
+        "--unit", unit,
+        "--collect",
+        "--property=Restart=no",
+        "bash", UPDATE_SCRIPT, version,
+    ]
+    logger.info(f"Starte Update {version} via systemd-Unit {unit} ...")
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    except FileNotFoundError:
+        # Fallback ohne systemd-run (sollte auf Ubuntu nicht vorkommen)
+        logger.warning("systemd-run nicht verfuegbar - Fallback: direkter Start. "
+                       "ACHTUNG: update.sh stoppt den Engine-Dienst und damit "
+                       "moeglicherweise diesen eigenen Prozess.")
+        try:
+            subprocess.Popen(
+                ["bash", UPDATE_SCRIPT, version],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+            return True
+        except OSError as exc:
+            logger.error(f"Update-Start fehlgeschlagen: {exc}")
+            return False
+    except subprocess.TimeoutExpired:
+        logger.error("systemd-run Timeout nach 30s - Update nicht gestartet.")
+        return False
+
+    if result.returncode != 0:
+        logger.error(f"systemd-run fehlgeschlagen (RC={result.returncode}): "
+                     f"{result.stderr.strip()}")
+        return False
+    logger.info(f"Update {version} gestartet (Unit {unit}). Die Dienste werden "
+                "vom Update-Skript neu gestartet.")
+    return True
+
+
+# ---------------------------------------------------------------------------
 # Main-Block (nur bei direktem Aufruf als Daemon)
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
@@ -559,6 +662,7 @@ if __name__ == "__main__":
     while True:
         now = time.time()
         should_run = False
+        pending_update = None
 
         with flask_app.app_context():
             state = SystemState.query.first()
@@ -573,6 +677,9 @@ if __name__ == "__main__":
                 should_run = True
                 logger.info("Routine-Zyklus gestartet.")
 
+            if state and state.update_pending:
+                pending_update = state.update_pending
+
         if should_run:
             try:
                 run_full_cycle(flask_app)
@@ -581,6 +688,29 @@ if __name__ == "__main__":
                 logger.error(f"Schwerer Fehler im Zyklus: {e}")
                 last_run_time = time.time()
         else:
+            # --- Update-Wunsch aus der WebUI abarbeiten ---------------------
+            if pending_update:
+                if lock_exists():
+                    logger.info(f"Update {pending_update} wartet auf einen "
+                                "freien Lock (Zyklus laeuft gerade) ...")
+                else:
+                    # Flag ZUERST leeren: update.sh stoppt den Engine-Dienst,
+                    # der Daemon kann danach nicht mehr selbst loeschen. Ein
+                    # verbliebenes Flag triggere nach dem Neustart sofort ein
+                    # zweites Update (Endlosschleife).
+                    with flask_app.app_context():
+                        st = SystemState.query.first()
+                        if st and st.update_pending:
+                            st.update_pending = None
+                            db.session.commit()
+                    if not _launch_update(pending_update):
+                        # Start fehlgeschlagen -> Flag zuruecksetzen fuer Retry.
+                        with flask_app.app_context():
+                            st = SystemState.query.first()
+                            if st:
+                                st.update_pending = pending_update
+                                db.session.commit()
+
             if (now - last_heartbeat) >= 21600:
                 logger.info("Daemon läuft im Hintergrund...")
                 last_heartbeat = now

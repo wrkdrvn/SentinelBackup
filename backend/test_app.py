@@ -8,17 +8,30 @@ import tempfile
 
 import pytest
 
-from app import app
-from database import db
+# WICHTIG: muss VOR "from app import app" passieren. app.py bindet die
+# SQLite-DB bereits beim Import (sonst: produktive DB oder Absturz ohne
+# /opt-Verzeichnis - genau das war der Grund, warum die Suite vorher bei
+# der Collection starb). SENTINEL_DB_PATH legt die Test-DB ins Temp-Verz.
+_TEST_TMP = tempfile.mkdtemp(prefix="sentinelbackup_test_")
+os.environ.setdefault("SENTINEL_DB_PATH", os.path.join(_TEST_TMP, "test.db"))
+
+from app import app  # noqa: E402
+from database import db  # noqa: E402
+
+
+def _repo_version():
+    """Liest die VERSION-Datei aus dem Repo (kein hartcodierter String)."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    with open(os.path.join(here, "..", "VERSION"), "r", encoding="utf-8") as fh:
+        return fh.read().strip()
 
 
 @pytest.fixture
 def client():
-    """Test-Client mit frischer temporaerer DB."""
-    db_fd, db_path = tempfile.mkstemp(suffix=".db")
+    """Test-Client mit frischer DB (pro Test: drop + create). Die DB liegt
+    ueber SENTINEL_DB_PATH im Temp-Verzeichnis - die produktive Datei wird
+    nie angerasst."""
     app.config["TESTING"] = True
-    app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{db_path}"
-    app.config["WTF_CSRF_ENABLED"] = False
 
     with app.app_context():
         db.drop_all()
@@ -30,12 +43,6 @@ def client():
 
     with app.test_client() as client:
         yield client
-
-    os.close(db_fd)
-    try:
-        os.unlink(db_path)
-    except OSError:
-        pass
 
 
 def test_index_returns_200_and_contains_sentinelbackup(client):
@@ -49,7 +56,7 @@ def test_health_returns_correct_json_and_version(client):
     assert response.status_code == 200
     data = response.get_json()
     assert data["status"] == "ok"
-    assert data["version"] == "1.2.0"
+    assert data["version"] == _repo_version()
 
 
 def test_create_server_via_post(client):
@@ -143,13 +150,44 @@ def test_settings_shows_update_panel(client):
     assert b'target_version' in response.data
 
 
-def test_start_update_returns_alert(client):
+def test_start_update_sets_pending_flag(client):
+    """Gueltige Version -> Flag in der DB (DB-Trigger-Design, kein Thread)."""
     response = client.post("/api/start_update", data={"target_version": "v1.1.0"})
     assert response.status_code == 200
-    assert b"Update-Prozess gestartet" in response.data
+    assert b"eingeleitet" in response.data
+    with app.app_context():
+        from models import SystemState
+        assert SystemState.query.first().update_pending == "v1.1.0"
+
+
+def test_start_update_rejects_invalid_version_format(client):
+    """Beliebige Strings duerfen nie als Update-Version akzeptiert werden."""
+    response = client.post(
+        "/api/start_update", data={"target_version": "v1.1.0; rm -rf /"}
+    )
+    assert response.status_code == 200
+    assert b"Ungueltiges Versionsformat" in response.data
+    with app.app_context():
+        from models import SystemState
+        assert SystemState.query.first().update_pending is None
 
 
 def test_start_update_empty_version_warning(client):
     response = client.post("/api/start_update", data={})
     assert response.status_code == 200
     assert b"Keine Ziel-Version" in response.data
+
+
+def test_trigger_engine_creates_state_row_if_missing(client):
+    """Fehlt die SystemState-Zeile, soll sie angelegt werden - kein stiller
+    Erfolg ohne Wirkung (frueherer Bug #8)."""
+    with app.app_context():
+        from models import SystemState
+        SystemState.query.delete()
+        db.session.commit()
+    response = client.post("/api/trigger_engine")
+    assert response.status_code == 200
+    assert b"Backup-Zyklus" in response.data
+    with app.app_context():
+        from models import SystemState
+        assert SystemState.query.first().trigger_run is True

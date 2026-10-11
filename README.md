@@ -16,7 +16,7 @@
 ![Flask](https://img.shields.io/badge/Flask-3.0-lightgrey)
 ![Platform](https://img.shields.io/badge/Platform-Ubuntu%2024.04-orange)
 ![License](https://img.shields.io/badge/License-MIT-green)
-![Version](https://img.shields.io/badge/version-1.0.0-blue)
+![Version](https://img.shields.io/badge/version-1.2.0-blue)
 
 > A lightweight, pull-based backup orchestrator for MailCow, ISPConfig, and Docker hosts — with Synology NAS support.
 

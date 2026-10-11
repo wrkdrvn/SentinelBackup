@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SentinelBackup - SQLAlchemy Models
 # Author: WrkDrvn
-# Version: 1.0.1
+# Version: 1.2.0
 #
 # Datenmodelle fuer Server und NAS-Konfiguration.
 
@@ -90,6 +90,9 @@ class SystemState(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     trigger_run = db.Column(db.Boolean, default=False, nullable=False)
     routine_interval_minutes = db.Column(db.Integer, default=60, nullable=False)
+    # Update-Wunsch aus der WebUI (z.B. "v1.3.0"). Der root-Daemon pollt
+    # diesen Wert, startet update.sh und leert das Feld danach.
+    update_pending = db.Column(db.String(32), nullable=True)
 
     def __repr__(self):
         return f"<SystemState id={self.id} trigger_run={self.trigger_run}>"

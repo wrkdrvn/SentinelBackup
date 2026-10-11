@@ -60,7 +60,7 @@ echo "|                                                               |"
 echo "+---------------------------------------------------------------+"
 echo ""
 echo ""
-echo "SentinelBackup Agent Installer Version 1.0.0"
+echo "SentinelBackup Agent Installer Version 1.2.0"
 echo ""
 echo ""
 
@@ -203,15 +203,19 @@ source /opt/sentinel_agent/.env
 
 DATA_DIR="/opt/sentinel_agent/data"
 FLAG_FILE="/opt/sentinel_agent/.backup_done"
+OUT_DIR="${DATA_DIR}.new"
+OLD_DATA="${DATA_DIR}.old"
 MYSQL_CNF="/tmp/.sb_mysql.cnf"
 TIMESTAMP=$(date +%Y-%m-%d_%H-%M)
 
 # Alte Flag loeschen (Sicherheitsnetz)
 rm -f "$FLAG_FILE"
 
-# Alte Daten loeschen
-rm -rf "${DATA_DIR:?}"/*
-mkdir -p "$DATA_DIR"
+# Das laufende DATA_DIR bleibt UNANGETASTET, bis das neue Backup sicher
+# fertig ist. Erst beim atomaren Swap wird ausgetauscht - ein
+# fehlgeschlagenes Backup hinterlaesst weiterhin die alte Sicherung.
+rm -rf "$OUT_DIR" "$OLD_DATA"
+mkdir -p "$OUT_DIR"
 
 # Temporaere .my.cnf erzeugen, damit das Passwort nicht in der
 # Prozessliste (ps aux) auftaucht. Datei wird sofort nach mysqldump
@@ -222,19 +226,26 @@ echo "password=$DB_PASS" >> "$MYSQL_CNF"
 chmod 600 "$MYSQL_CNF"
 
 echo "[agent] Sichere MySQL-Datenbanken ..."
-mysqldump --defaults-extra-file="$MYSQL_CNF" --all-databases | gzip > "$DATA_DIR/all_databases_$TIMESTAMP.sql.gz"
+mysqldump --defaults-extra-file="$MYSQL_CNF" --all-databases | gzip > "$OUT_DIR/all_databases_$TIMESTAMP.sql.gz"
 
 # Credentials-Datei sofort wieder entfernen
 rm -f "$MYSQL_CNF"
 
 echo "[agent] Sichere Web- und Mail-Verzeichnisse ..."
-tar -czpf "$DATA_DIR/web_vmail_$TIMESTAMP.tar.gz" /var/www/ /var/vmail/ 2>/dev/null || true
+tar -czpf "$OUT_DIR/web_vmail_$TIMESTAMP.tar.gz" /var/www/ /var/vmail/ 2>/dev/null || true
 
 echo "[agent] Sichere ISPConfig Konfiguration ..."
-tar -czpf "$DATA_DIR/ispconfig_config_$TIMESTAMP.tar.gz" /usr/local/ispconfig/ 2>/dev/null || true
+tar -czpf "$OUT_DIR/ispconfig_config_$TIMESTAMP.tar.gz" /usr/local/ispconfig/ 2>/dev/null || true
 
 echo "[agent] Bereinige alte Backups (behalte letzte 3) ..."
-cd "$DATA_DIR" && ls -t *.sql.gz *.tar.gz 2>/dev/null | tail -n +4 | xargs -r rm --
+cd "$OUT_DIR" && ls -t *.sql.gz *.tar.gz 2>/dev/null | tail -n +4 | xargs -r rm --
+
+# Atomarer Swap: neues Backup erst dann sichtbar, wenn es fertig ist.
+if [ -d "$DATA_DIR" ]; then
+    mv "$DATA_DIR" "$OLD_DATA"
+fi
+mv "$OUT_DIR" "$DATA_DIR"
+rm -rf "$OLD_DATA"
 
 # Flag setzen bei Erfolg
 touch "$FLAG_FILE"
@@ -243,31 +254,48 @@ EOF
         ;;
 
     mailcow)
-cat << 'EOF' > /opt/sentinel_agent/run.sh
+        cat << 'EOF' > "${RUN_SCRIPT}"
 #!/bin/bash
+# SentinelBackup Agent - MailCow Backup-Skript
+# Autor: WrkDrvn - vom Installer erzeugt, NICHT manuell aendern.
 set -e
+
+# Lade die Konfiguration (MAILCOW_DIR aus der Setup-Eingabe)
+source /opt/sentinel_agent/.env
+MAILCOW_DIR="${MAILCOW_DIR:-/opt/mailcow-dockerized}"
 
 DATA_DIR="/opt/sentinel_agent/data"
 FLAG_FILE="/opt/sentinel_agent/.backup_done"
-MAILCOW_DIR="/opt/mailcow-dockerized"
+TMP_DATA="${DATA_DIR}.new"
+OLD_DATA="${DATA_DIR}.old"
 
 # Alte Flag loeschen (Sicherheitsnetz)
 rm -f "$FLAG_FILE"
 
-# Alte Daten loeschen
-rm -rf "${DATA_DIR:?}"/*
-mkdir -p "$DATA_DIR"
+# Temporaere Verzeichnisse vorbereiten. Das laufende DATA_DIR bleibt
+# UNANGETASTET, bis das neue Backup sicher fertig ist (kein Datenverlust
+# mehr bei fehlgeschlagenem Backup).
+rm -rf "$TMP_DATA" "$OLD_DATA"
+mkdir -p "$TMP_DATA"
 
-echo "[agent] Starte offizielles MailCow Backup ..."
+echo "[agent] Starte offizielles MailCow Backup (Ziel: $TMP_DATA) ..."
 cd "$MAILCOW_DIR"
-MAILCOW_BACKUP_LOCATION="$DATA_DIR" ./helper-scripts/backup_and_restore.sh backup all
+MAILCOW_BACKUP_LOCATION="$TMP_DATA" ./helper-scripts/backup_and_restore.sh backup all
 
 echo "[agent] Ueberpruefe Backup-Ergebnis ..."
-if [ -n "$(ls -A "$DATA_DIR" 2>/dev/null)" ]; then
+if [ -n "$(ls -A "$TMP_DATA" 2>/dev/null)" ]; then
+    # Atomarer Swap: neues Backup erst dann sichtbar, wenn es fertig ist.
+    if [ -d "$DATA_DIR" ]; then
+        mv "$DATA_DIR" "$OLD_DATA"
+    fi
+    mv "$TMP_DATA" "$DATA_DIR"
+    rm -rf "$OLD_DATA"
     touch "$FLAG_FILE"
     echo "[agent] MailCow Backup erfolgreich abgeschlossen."
 else
-    echo "[agent] FEHLER: MailCow Backup-Verzeichnis ist leer!"
+    echo "[agent] FEHLER: MailCow Backup-Verzeichnis ist leer!" >&2
+    rm -rf "$TMP_DATA"
+    exit 1
 fi
 EOF
         ;;
@@ -284,14 +312,17 @@ source /opt/sentinel_agent/.env
 
 DATA_DIR="/opt/sentinel_agent/data"
 FLAG_FILE="/opt/sentinel_agent/.backup_done"
+OUT_DIR="${DATA_DIR}.new"
+OLD_DATA="${DATA_DIR}.old"
 TIMESTAMP=$(date +%Y-%m-%d_%H-%M)
 
 # Alte Flag loeschen (Sicherheitsnetz)
 rm -f "$FLAG_FILE"
 
-# Alte Daten loeschen
-rm -rf "${DATA_DIR:?}"/*
-mkdir -p "$DATA_DIR"
+# Das laufende DATA_DIR bleibt UNANGETASTET, bis das neue Backup sicher
+# fertig ist (atomarer Swap am Ende).
+rm -rf "$OUT_DIR" "$OLD_DATA"
+mkdir -p "$OUT_DIR"
 
 echo "[agent] Sammle docker-compose und .env Dateien aus ${COMPOSE_BASE} ..."
 
@@ -304,13 +335,14 @@ FOUND=$(find "$COMPOSE_BASE" -type f \( \
 
 if [ -z "$FOUND" ]; then
     echo "[agent] Keine Compose-/.env-Dateien in $COMPOSE_BASE gefunden." >&2
+    rm -rf "$OUT_DIR"
     exit 1
 fi
 
-# Gefundene Dateien mit Struktur ins Datenverzeichnis kopieren
+# Gefundene Dateien mit Struktur ins Temporaerverzeichnis kopieren
 echo "$FOUND" | while IFS= read -r f; do
     rel="${f#${COMPOSE_BASE}/}"
-    dest="$DATA_DIR/$rel"
+    dest="$OUT_DIR/$rel"
     mkdir -p "$(dirname "$dest")"
     cp -p "$f" "$dest"
 done
@@ -318,10 +350,17 @@ done
 # Zustand der laufenden Container sichern (Portainer-Kompatibilitaet)
 echo "[agent] Sichere Container-Inventory ..."
 docker ps --format '{{.Names}}\t{{.Image}}\t{{.Status}}' \
-    > "$DATA_DIR/container_inventory_$TIMESTAMP.txt" 2>/dev/null || true
+    > "$OUT_DIR/container_inventory_$TIMESTAMP.txt" 2>/dev/null || true
 
 echo "[agent] Bereinige alte Backups (behalte letzte 3) ..."
-cd "$DATA_DIR" && ls -t container_inventory_*.txt 2>/dev/null | tail -n +4 | xargs -r rm --
+cd "$OUT_DIR" && ls -t container_inventory_*.txt 2>/dev/null | tail -n +4 | xargs -r rm --
+
+# Atomarer Swap: neues Backup erst dann sichtbar, wenn es fertig ist.
+if [ -d "$DATA_DIR" ]; then
+    mv "$DATA_DIR" "$OLD_DATA"
+fi
+mv "$OUT_DIR" "$DATA_DIR"
+rm -rf "$OLD_DATA"
 
 # Flag setzen bei Erfolg
 touch "$FLAG_FILE"
@@ -341,15 +380,26 @@ source /opt/sentinel_agent/.env
 
 DATA_DIR="/opt/sentinel_agent/data"
 FLAG_FILE="/opt/sentinel_agent/.backup_done"
+OUT_DIR="${DATA_DIR}.new"
+OLD_DATA="${DATA_DIR}.old"
 MYSQL_CNF="/tmp/.sb_mysql.cnf"
 TIMESTAMP=$(date +%Y-%m-%d_%H-%M)
+
+# Trimmt Leerzeichen am Anfang/Ende eines Listen-Eintrags.
+trim() {
+    local s="$1"
+    s="${s#"${s%%[![:space:]]*}"}"
+    s="${s%"${s##*[![:space:]]}"}"
+    printf '%s' "$s"
+}
 
 # Alte Flag loeschen (Sicherheitsnetz)
 rm -f "$FLAG_FILE"
 
-# Alte Daten loeschen
-rm -rf "${DATA_DIR:?}"/*
-mkdir -p "$DATA_DIR"
+# Das laufende DATA_DIR bleibt UNANGETASTET, bis das neue Backup sicher
+# fertig ist (atomarer Swap am Ende).
+rm -rf "$OUT_DIR" "$OLD_DATA"
+mkdir -p "$OUT_DIR"
 
 # --- Pre-Script ausfuehren ---
 if [ -n "$PRE_SCRIPT" ] && [ -x "$PRE_SCRIPT" ]; then
@@ -365,10 +415,17 @@ if [ -n "$DB_PASS" ] && [ -n "$DB_NAMES" ]; then
     echo "password=$DB_PASS" >> "$MYSQL_CNF"
     chmod 600 "$MYSQL_CNF"
 
-    for db in $(echo "$DB_NAMES" | tr ',' ' '); do
+    # Komma-getrennte Liste als Array: kein Word-Splitting auf Leerzeichen
+    # (frueher zerlegten DB-Namen mit Leerzeichen das Backup).
+    IFS=',' read -ra DB_ARRAY <<< "$DB_NAMES"
+    for db in "${DB_ARRAY[@]}"; do
+        db="$(trim "$db")"
+        if [ -z "$db" ]; then
+            continue
+        fi
         echo "[agent] Dump: $db"
         mysqldump --defaults-extra-file="$MYSQL_CNF" --single-transaction "$db" \
-            | gzip > "$DATA_DIR/db_${db}_${TIMESTAMP}.sql.gz"
+            | gzip > "$OUT_DIR/db_${db}_${TIMESTAMP}.sql.gz"
     done
     rm -f "$MYSQL_CNF"
 fi
@@ -376,11 +433,17 @@ fi
 # --- Verzeichnis-Sicherung ---
 if [ -n "$DIRS" ]; then
     echo "[agent] Sichere Verzeichnisse ..."
-    for dir in $(echo "$DIRS" | tr ',' ' '); do
+    # Komma-getrennte Liste als Array: Pfade mit Leerzeichen funktionieren.
+    IFS=',' read -ra DIR_ARRAY <<< "$DIRS"
+    for dir in "${DIR_ARRAY[@]}"; do
+        dir="$(trim "$dir")"
+        if [ -z "$dir" ]; then
+            continue
+        fi
         if [ -d "$dir" ]; then
             dir_name=$(echo "$dir" | tr '/' '_' | sed 's/^_//')
             echo "[agent] tar: $dir -> ${dir_name}.tar.gz"
-            tar -czpf "$DATA_DIR/${dir_name}_${TIMESTAMP}.tar.gz" "$dir" 2>/dev/null || true
+            tar -czpf "$OUT_DIR/${dir_name}_${TIMESTAMP}.tar.gz" "$dir" 2>/dev/null || true
         else
             echo "[agent] WARN: Verzeichnis nicht gefunden: $dir"
         fi
@@ -389,13 +452,20 @@ fi
 
 # --- Bereinige alte Backups (behalte letzte 3) ---
 echo "[agent] Bereinige alte Backups (behalte letzte 3) ..."
-cd "$DATA_DIR" && ls -t *.sql.gz *.tar.gz 2>/dev/null | tail -n +4 | xargs -r rm --
+cd "$OUT_DIR" && ls -t *.sql.gz *.tar.gz 2>/dev/null | tail -n +4 | xargs -r rm --
 
 # --- Post-Script ausfuehren ---
 if [ -n "$POST_SCRIPT" ] && [ -x "$POST_SCRIPT" ]; then
     echo "[agent] Fuehre Post-Script aus: $POST_SCRIPT"
     bash "$POST_SCRIPT" || { echo "[agent] Post-Script fehlgeschlagen!" >&2; }
 fi
+
+# Atomarer Swap: neues Backup erst dann sichtbar, wenn es fertig ist.
+if [ -d "$DATA_DIR" ]; then
+    mv "$DATA_DIR" "$OLD_DATA"
+fi
+mv "$OUT_DIR" "$DATA_DIR"
+rm -rf "$OLD_DATA"
 
 # Flag setzen bei Erfolg
 touch "$FLAG_FILE"

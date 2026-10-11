@@ -52,7 +52,12 @@ AUTHOR = "WrkDrvn"
 app = Flask(__name__)
 
 # SQLite-Datenbank unter dem Installationspfad
-app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:////opt/sentinelbackup/database.db"
+_db_uri = os.environ.get("SENTINEL_DB_PATH", "sqlite:////opt/sentinelbackup/database.db")
+if "://" not in _db_uri:
+    # SENTINEL_DB_PATH akzeptiert auch einen rohen Dateipfad (Tests/CLI);
+    # SQLAlchemy braucht dafuer die URL-Form.
+    _db_uri = "sqlite:///" + _db_uri
+app.config["SQLALCHEMY_DATABASE_URI"] = _db_uri
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
 # DB initialisieren (WAL-Modus + Tabellen via create_all)
@@ -70,6 +75,22 @@ AGENT_SCRIPT = "setup_agent.sh"
 # ---------------------------------------------------------------------------
 # Hilfsfunktionen
 # ---------------------------------------------------------------------------
+def _get_state():
+    """Liefert die SystemState-Singleton-Zeile und legt sie an, falls sie
+    fehlt. So melden Trigger/Intervall/Update nie einen Erfolg, der in
+    Wahrheit ins Leere laeuft (z.B. nach manuellen DB-Eingriffen)."""
+    state = SystemState.query.first()
+    if state is None:
+        state = SystemState(trigger_run=False)
+        db.session.add(state)
+        try:
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+            return SystemState.query.first()
+    return state
+
+
 def _read_ssh_pub_key():
     """Liest den oeffentlichen SSH-Key. Fallback-String bei Fehler."""
     try:
@@ -91,7 +112,7 @@ def dashboard():
     ssh_key = _read_ssh_pub_key()
     active_servers = Server.query.filter_by(active=True).count()
     total_servers = Server.query.count()
-    state = SystemState.query.first()
+    state = _get_state()
     routine_interval = state.routine_interval_minutes if state else 60
     return render_template(
         "dashboard.html",
@@ -405,10 +426,9 @@ def trigger_engine():
     fuehrt den Zyklus als root aus. So entfaellt das fruehere, fehleranfaellige
     /tmp-Triggerfile (Permission-Denied zwischen www-data und root).
     Gibt ein HTML-Alert-Snippet zurueck, das HTMX in die Status-Flaeche swappt."""
-    state = SystemState.query.first()
-    if state:
-        state.trigger_run = True
-        db.session.commit()
+    state = _get_state()
+    state.trigger_run = True
+    db.session.commit()
     return '''<div class="alert alert-success alert-dismissible fade show" role="alert">
             Backup-Zyklus angestoßen (startet in wenigen Sekunden).
             <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
@@ -446,10 +466,9 @@ def save_interval():
     if interval_int not in (10, 20, 30, 60, 120, 300):
         interval_int = 60
 
-    state = SystemState.query.first()
-    if state:
-        state.routine_interval_minutes = interval_int
-        db.session.commit()
+    state = _get_state()
+    state.routine_interval_minutes = interval_int
+    db.session.commit()
 
     return ('<div class="alert alert-success alert-dismissible fade show" '
             'role="alert"><i class="bi bi-check-circle me-1"></i>'
@@ -460,11 +479,12 @@ def save_interval():
 
 @app.route("/api/start_update", methods=["POST"])
 def start_update():
-    """Startet den Update-Prozess in einem Hintergrund-Thread, damit das
-    Web-UI nicht blockiert. Das update.sh Skript stoppt die Dienste,
-    fuehrt den rsync durch und startet alles wieder."""
-    import threading
-    import subprocess
+    """Tragt die Ziel-Version als Update-Wunsch in die Datenbank ein.
+    Der root-Daemon (Engine) pollt diesen Wert und startet update.sh
+    aus privilegiertem Kontext (Web-Prozess ist www-data und darf/soll
+    nichts vom System aendern). Versionsformat wird validiert, damit
+    kein beliebiger String im root-Kontext landet."""
+    import re
 
     target_version = request.form.get("target_version", "").strip()
     if not target_version:
@@ -474,17 +494,22 @@ def start_update():
                 '<button type="button" class="btn-close" data-bs-dismiss="alert">'
                 '</button></div>')
 
-    def _run_update():
-        subprocess.run(
-            ["bash", "/opt/sentinelbackup/update.sh", target_version],
-            capture_output=True, text=True, timeout=600,
-        )
+    # Nur semver-artige Tags akzeptieren (z.B. v1.3.0) - SB-020.
+    if not re.fullmatch(r"v\d+\.\d+\.\d+", target_version):
+        return ('<div class="alert alert-danger alert-dismissible fade show" '
+                'role="alert"><i class="bi bi-exclamation-triangle me-1"></i>'
+                'Ungueltiges Versionsformat (erwartet z.B. v1.3.0). '
+                '<button type="button" class="btn-close" data-bs-dismiss="alert">'
+                '</button></div>')
 
-    threading.Thread(target=_run_update, daemon=True).start()
+    state = _get_state()
+    state.update_pending = target_version
+    db.session.commit()
 
     return ('<div class="alert alert-success alert-dismissible fade show" '
             'role="alert"><i class="bi bi-check-circle me-1"></i>'
-            'Update-Prozess gestartet. Bitte laden Sie das Dashboard in 1 Minute neu. '
+            f'Update auf {target_version} eingeleitet. Die Engine fuehrt es im '
+            'naechsten Durchlauf aus (Dienste werden neu gestartet). '
             '<button type="button" class="btn-close" data-bs-dismiss="alert">'
             '</button></div>')
 

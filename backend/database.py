@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SentinelBackup - Database Engine Setup
 # Author: WrkDrvn
-# Version: 0.7.1
+# Version: 1.2.0
 #
 # Definiert das zentrale SQLAlchemy-Objekt und stellt init_db(app)
 # bereit. db wird hier (nicht in app.py) definiert, um
@@ -72,6 +72,16 @@ def init_db(app):
         try:
             db.session.execute(
                 text("ALTER TABLE nas_config ADD COLUMN ssh_port INTEGER DEFAULT 2022")
+            )
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
+        # Sicheres Hinzufuegen der Update-Wunsch-Spalte (DB-Trigger-Design:
+        # WebUI schreibt, root-Daemon liest und fuehrt update.sh aus).
+        try:
+            db.session.execute(
+                text("ALTER TABLE system_state ADD COLUMN update_pending VARCHAR(32)")
             )
             db.session.commit()
         except Exception:
