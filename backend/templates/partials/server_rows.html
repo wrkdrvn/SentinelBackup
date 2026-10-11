@@ -18,6 +18,14 @@
             {% endif %}
         </td>
         <td class="text-end">
+            <!-- HTMX: Bearbeiten-Modal (Feature: Server editieren) -->
+            <button class="btn btn-sm btn-outline-primary me-1"
+                    hx-get="/servers/edit_modal/{{ s.id }}"
+                    hx-target="#modal-slot"
+                    hx-swap="innerHTML"
+                    title="Bearbeiten">
+                <i class="bi bi-pencil"></i>
+            </button>
             <button class="btn btn-sm btn-outline-danger"
                     hx-post="/servers/delete/{{ s.id }}"
                     hx-target="#server-table-body"

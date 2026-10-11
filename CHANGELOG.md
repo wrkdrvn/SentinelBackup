@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Server bearbeiten:** Neue Edit-Funktion in der Server-Liste (Stift-Icon), Modal mit bestehenden Werten, geteilte Validierung mit "Hinzufuegen".
+- **Backup-Verlauf & Statistik:** Neue Seite `/logs` mit 30-Tage-Statistik (Laeufe, Erfolgsquote, Fehler, Uebersprungen), Statusfilter und paginierter History (50/Seite); Nav-Eintrag "Verlauf".
+- **NAS-Retention:** Aufbewahrungsfrist in Tagen in der NAS-Konfiguration (0 = unbegrenzt). Die Engine Raeumt nach erfolgreichem Push alte Dateien der konfigurierten Server-Ordner auf der NAS auf - fremde Daten auf dem Share bleiben unangetastet (realpath-Schutz).
+- **Fehler-Alarm (Matrix):** Einstellungsseite bekommt Benachrichtigungs-Formular (Homeserver, Room, Access-Token, Cooldown). Die Engine sendet bei fehlgeschlagenen Zyklen eine Matrix-Nachricht (stdlib urllib, keine neuen Abhaengigkeiten), inkl. Cooldown gegen Alarm-Flut.
+
 ### Fixed
 - Critical: Test-Suite war nicht ausfuehrbar (Datenbankpfad hartcodiert, Absturz bei Import ohne /opt-Verzeichnis). DB-Pfad jetzt via `SENTINEL_DB_PATH` ueberschreibbar; 24 Tests laufen gruen.
 - Critical: Update-Funktion war defekt (update.sh verlangt root, lief als www-data; UI meldete trotzdem Erfolg). Jetzt DB-Trigger-Design: WebUI validiert das Versionsformat und traegt `update_pending` ein, der root-Daemon startet das Update in eigener systemd-Transient-Unit (keine sudoers-Erweiterung noetig).

@@ -1,5 +1,6 @@
-{# Partials: Formular-Felder fuer das "Server hinzufuegen" Modal.
-   Wird in servers.html per {% include %} geladen.
+{# Formular-Felder fuer "Server hinzufuegen" UND "Server bearbeiten".
+   Wird in servers.html (Add-Modal, ohne server-Kontext -> Agent-Defaults)
+   und im Edit-Modal (mit server-Kontext -> bestehende Werte) eingebunden.
    Die Pfade sind auf die Standardwerte des SentinelBackup Agents
    (/opt/sentinel_agent/) vorausgefuellt, damit der Nutzer direkt
    uebernehmen kann. #}
@@ -8,48 +9,52 @@
         <div class="col-md-6">
             <label class="form-label">Hostname *</label>
             <input type="text" name="hostname" class="form-control" required
+                   value="{{ server.hostname if server else '' }}"
                    placeholder="mail01.example.com">
         </div>
-                        <div class="col-md-6">
-                            <label class="form-label">IP-Adresse *</label>
-                            <input type="text" name="ip" class="form-control" required
-                                   placeholder="10.0.0.21">
-                        </div>
-                        <div class="col-md-6">
-                            <label class="form-label">SSH-Port</label>
-                            <input type="number" name="ssh_port" class="form-control"
-                                   value="22" min="1" max="65535">
-                            <small class="text-secondary">Standard 22 - abweichend z.B. 2022</small>
-                        </div>
-                        <div class="col-md-6">
-                            <label class="form-label">SSH-User</label>
-                            <input type="text" name="ssh_user" class="form-control" value="root">
-                        </div>
+        <div class="col-md-6">
+            <label class="form-label">IP-Adresse *</label>
+            <input type="text" name="ip" class="form-control" required
+                   value="{{ server.ip if server else '' }}"
+                   placeholder="10.0.0.21">
+        </div>
+        <div class="col-md-6">
+            <label class="form-label">SSH-Port</label>
+            <input type="number" name="ssh_port" class="form-control"
+                   value="{{ server.ssh_port if server else 22 }}" min="1" max="65535">
+            <small class="text-secondary">Standard 22 - abweichend z.B. 2022</small>
+        </div>
+        <div class="col-md-6">
+            <label class="form-label">SSH-User</label>
+            <input type="text" name="ssh_user" class="form-control"
+                   value="{{ server.ssh_user if server else 'root' }}">
+        </div>
         <div class="col-md-6">
             <label class="form-label">Servertyp</label>
             <select name="server_type" class="form-select">
-                <option value="mailcow">MailCow</option>
-                <option value="ispconfig">ISPConfig</option>
-                <option value="docker" selected>Docker</option>
-                <option value="proxmox">Proxmox</option>
-                <option value="custom">Custom (Manuell konfiguriert)</option>
+                <option value="mailcow" {{ 'selected' if server and server.server_type == 'mailcow' else '' }}>MailCow</option>
+                <option value="ispconfig" {{ 'selected' if server and server.server_type == 'ispconfig' else '' }}>ISPConfig</option>
+                <option value="docker" {{ 'selected' if (not server) or server.server_type == 'docker' else '' }}>Docker</option>
+                <option value="proxmox" {{ 'selected' if server and server.server_type == 'proxmox' else '' }}>Proxmox</option>
+                <option value="custom" {{ 'selected' if server and server.server_type == 'custom' else '' }}>Custom (Manuell konfiguriert)</option>
             </select>
         </div>
         <div class="col-md-6">
             <label class="form-label">Backup-Pfad (Ziel)</label>
             <input type="text" name="backup_path" class="form-control"
-                   value="/opt/sentinel_agent/data/">
+                   value="{{ server.backup_path if server else '/opt/sentinel_agent/data/' }}">
             <small class="text-secondary">Standard des SentinelBackup Agents</small>
         </div>
         <div class="col-md-6">
             <label class="form-label">Flag-Pfad (Quelle)</label>
             <input type="text" name="flag_path" class="form-control"
-                   value="/opt/sentinel_agent/.backup_done">
+                   value="{{ server.flag_path if server else '/opt/sentinel_agent/.backup_done' }}">
             <small class="text-secondary">Standard des SentinelBackup Agents</small>
         </div>
         <div class="col-12">
             <div class="form-check">
-                <input class="form-check-input" type="checkbox" name="active" id="chActive" checked>
+                <input class="form-check-input" type="checkbox" name="active" id="chActive"
+                       {{ 'checked' if not server or server.active else '' }}>
                 <label class="form-check-label" for="chActive">Aktiv</label>
             </div>
         </div>

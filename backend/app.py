@@ -11,6 +11,7 @@
 # geliefert, die HTMX in die Ziel-Container swappt.
 
 import os
+from datetime import datetime, timedelta, timezone
 from flask import (
     Flask,
     jsonify,
@@ -103,6 +104,34 @@ def _read_ssh_pub_key():
         return "SSH Key nicht gefunden."
 
 
+def _server_fields(data, active_default="on"):
+    """Validiert Server-Formulardaten und liefert das Feld-Dict.
+    Add und Edit teilen sich diese Validierung. active_default steuert das
+    Verhalten bei FEHLENDEM Checkbox-Feld: Add legacy-maessig "an"
+    (Kurl/Curl ohne Feld), Edit korrekterweise "aus" - Browser senden
+    abgewaehlte Checkboxen nicht mit."""
+    server_type = data.get("server_type", "docker")
+    if server_type not in Server.VALID_TYPES:
+        abort(400, "Ungueltiger Servertyp")
+
+    ssh_port_str = data.get("ssh_port", "22").strip()
+    try:
+        ssh_port = int(ssh_port_str) if ssh_port_str else 22
+    except ValueError:
+        ssh_port = 22
+
+    return {
+        "hostname": data.get("hostname", "").strip(),
+        "ip": data.get("ip", "").strip(),
+        "ssh_user": data.get("ssh_user", "root").strip(),
+        "ssh_port": ssh_port,
+        "backup_path": data.get("backup_path", "").strip(),
+        "flag_path": data.get("flag_path", "/var/run/backup_done").strip(),
+        "server_type": server_type,
+        "active": data.get("active", active_default) == "on",
+    }
+
+
 # ---------------------------------------------------------------------------
 # Seiten-Routen (ganze HTML-Seiten)
 # ---------------------------------------------------------------------------
@@ -161,8 +190,8 @@ def scripts():
 
 @app.route("/settings")
 def settings():
-    """System-Einstellungsseite (Update, zukuenftig weitere Optionen)."""
-    return render_template("settings.html", version=APP_VERSION)
+    """System-Einstellungsseite (Update + Benachrichtigungen)."""
+    return render_template("settings.html", version=APP_VERSION, state=_get_state())
 
 
 # ---------------------------------------------------------------------------
@@ -173,26 +202,7 @@ def add_server():
     """Legt einen neuen Server an und gibt die aktualisierten Tabellen-Zeilen
     als HTML-Snippet zurueck (kein redirect, keine ganze Seite)."""
     data = request.form
-    server_type = data.get("server_type", "docker")
-    if server_type not in Server.VALID_TYPES:
-        abort(400, "Ungueltiger Servertyp")
-
-    ssh_port_str = data.get("ssh_port", "22").strip()
-    try:
-        ssh_port = int(ssh_port_str) if ssh_port_str else 22
-    except ValueError:
-        ssh_port = 22
-
-    server = Server(
-        hostname=data.get("hostname", "").strip(),
-        ip=data.get("ip", "").strip(),
-        ssh_user=data.get("ssh_user", "root").strip(),
-        ssh_port=ssh_port,
-        backup_path=data.get("backup_path", "").strip(),
-        flag_path=data.get("flag_path", "/var/run/backup_done").strip(),
-        server_type=server_type,
-        active=data.get("active", "on") == "on",
-    )
+    server = Server(**_server_fields(data))
     db.session.add(server)
     try:
         db.session.commit()
@@ -219,6 +229,39 @@ def delete_server(server_id):
     except Exception as exc:
         db.session.rollback()
         abort(500, f"Fehler beim Loeschen: {exc}")
+
+    return render_template(
+        "partials/server_rows.html",
+        servers=Server.query.order_by(Server.id.desc()).all(),
+    )
+
+
+@app.route("/servers/edit_modal/<int:server_id>")
+def edit_server_modal(server_id):
+    """Liefert das Bearbeiten-Modal fuer einen Server (HTMX-Fragment).
+    Das Fragment enthaelt ein Script, das das Modal anzeigt."""
+    server = db.session.get(Server, server_id)
+    if server is None:
+        abort(404)
+    return render_template("partials/server_edit_modal.html", server=server)
+
+
+@app.route("/servers/edit/<int:server_id>", methods=["POST"])
+def edit_server(server_id):
+    """Speichert die Aenderungen eines Servers und gibt die aktualisierten
+    Tabellen-Zeilen zurueck (HTMX, kein redirect)."""
+    server = db.session.get(Server, server_id)
+    if server is None:
+        abort(404)
+
+    for key, value in _server_fields(request.form, active_default="").items():
+        setattr(server, key, value)
+
+    try:
+        db.session.commit()
+    except Exception as exc:
+        db.session.rollback()
+        abort(500, f"Fehler beim Speichern des Servers: {exc}")
 
     return render_template(
         "partials/server_rows.html",
@@ -253,6 +296,12 @@ def save_nas():
     nas.ssh_shutdown_cmd = (
         data.get("ssh_shutdown_cmd", "sudo synoshutdown --shutdown").strip() or "sudo synoshutdown --shutdown"
     )
+    # Aufbewahrungsfrist auf der NAS (Tage, 0 = unbegrenzt)
+    try:
+        retention = int(data.get("retention_days", "0").strip() or "0")
+    except ValueError:
+        retention = 0
+    nas.retention_days = max(retention, 0)
 
     try:
         db.session.commit()
@@ -473,6 +522,74 @@ def save_interval():
     return ('<div class="alert alert-success alert-dismissible fade show" '
             'role="alert"><i class="bi bi-check-circle me-1"></i>'
             'Intervall erfolgreich aktualisiert. '
+            '<button type="button" class="btn-close" data-bs-dismiss="alert">'
+            '</button></div>')
+
+
+@app.route("/logs")
+def logs_page():
+    """Backup-Verlauf: Statistik (letzte 30 Tage), Statusfilter,
+    paginierte History mit 50 Eintraegen pro Seite."""
+    page = request.args.get("page", 1, type=int)
+    if page < 1:
+        page = 1
+    status = request.args.get("status", "", type=str)
+    if status not in BackupLog.VALID_STATUSES:
+        status = ""
+
+    q = (
+        BackupLog.query
+        .options(db.joinedload(BackupLog.server))
+        .order_by(BackupLog.timestamp.desc())
+    )
+    if status:
+        q = q.filter(BackupLog.status == status)
+    pagination = q.paginate(page=page, per_page=50, error_out=False)
+
+    # Statistik der letzten 30 Tage
+    since = datetime.now(timezone.utc) - timedelta(days=30)
+    recent = BackupLog.query.filter(BackupLog.timestamp >= since)
+    total = recent.count()
+    success = recent.filter(BackupLog.status == "success").count()
+    failed = recent.filter(BackupLog.status == "failed").count()
+    skipped = recent.filter(BackupLog.status == "skipped").count()
+    rate = round(100 * success / total) if total else 0
+
+    return render_template(
+        "logs.html",
+        pagination=pagination,
+        status=status,
+        stats={
+            "total": total,
+            "success": success,
+            "failed": failed,
+            "skipped": skipped,
+            "rate": rate,
+        },
+        version=VERSION,
+        author=AUTHOR,
+    )
+
+
+@app.route("/settings/save_notifications", methods=["POST"])
+def save_notifications():
+    """Speichert die Matrix-Benachrichtigung fuer fehlgeschlagene Zyklen."""
+    data = request.form
+    state = _get_state()
+    state.notify_enabled = data.get("enabled") == "on"  # nur an, wenn aktiv
+    state.matrix_homeserver = data.get("homeserver", "").strip().rstrip("/")
+    state.matrix_room_id = data.get("room_id", "").strip()
+    state.matrix_access_token = data.get("access_token", "").strip()
+    try:
+        cooldown = int(data.get("cooldown_minutes", "60").strip() or "60")
+    except ValueError:
+        cooldown = 60
+    state.notify_cooldown_minutes = min(max(cooldown, 5), 1440)
+    db.session.commit()
+
+    return ('<div class="alert alert-success alert-dismissible fade show" '
+            'role="alert"><i class="bi bi-check-circle me-1"></i>'
+            'Benachrichtigungen gespeichert. '
             '<button type="button" class="btn-close" data-bs-dismiss="alert">'
             '</button></div>')
 

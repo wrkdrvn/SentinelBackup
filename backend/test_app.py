@@ -191,3 +191,181 @@ def test_trigger_engine_creates_state_row_if_missing(client):
     with app.app_context():
         from models import SystemState
         assert SystemState.query.first().trigger_run is True
+
+
+# ---------------------------------------------------------------------------
+# Feature: Server bearbeiten (Edit)
+# ---------------------------------------------------------------------------
+def _create_test_server(client, hostname="oldname"):
+    payload = {
+        "hostname": hostname,
+        "ip": "10.0.0.21",
+        "ssh_user": "root",
+        "ssh_port": "22",
+        "backup_path": "/opt/sentinel_agent/data/",
+        "flag_path": "/opt/sentinel_agent/.backup_done",
+        "server_type": "mailcow",
+        "active": "on",
+    }
+    client.post("/servers/add", data=payload)
+    with app.app_context():
+        from models import Server
+        return Server.query.filter_by(hostname=hostname).first().id
+
+
+def test_edit_server_modal_renders_with_values(client):
+    server_id = _create_test_server(client)
+    response = client.get(f"/servers/edit_modal/{server_id}")
+    assert response.status_code == 200
+    assert b"serverEditModal" in response.data
+    assert b"oldname" in response.data
+    assert b"/servers/edit/" in response.data
+
+
+def test_edit_server_modal_404_unknown(client):
+    assert client.get("/servers/edit_modal/99999").status_code == 404
+
+
+def test_edit_server_saves_changes(client):
+    server_id = _create_test_server(client)
+    payload = {
+        "hostname": "newname",
+        "ip": "10.0.0.99",
+        "ssh_user": "admin",
+        "ssh_port": "2222",
+        "backup_path": "/data/",
+        "flag_path": "/flag",
+        "server_type": "docker",
+        # "active" fehlt absichtlich -> inaktiv
+    }
+    response = client.post(f"/servers/edit/{server_id}", data=payload)
+    assert response.status_code == 200
+    assert b"newname" in response.data
+
+    with app.app_context():
+        from models import Server
+        server = db.session.get(Server, server_id)
+        assert server.hostname == "newname"
+        assert server.ip == "10.0.0.99"
+        assert server.ssh_user == "admin"
+        assert server.ssh_port == 2222
+        assert server.server_type == "docker"
+        assert server.active is False
+
+
+def test_edit_server_404_unknown(client):
+    response = client.post("/servers/edit/99999", data={"hostname": "x", "ip": "y"})
+    assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Feature: Backup-Verlauf & Statistik
+# ---------------------------------------------------------------------------
+def test_logs_page_renders(client):
+    response = client.get("/logs")
+    assert response.status_code == 200
+    assert b"Backup-Verlauf" in response.data
+    assert b"Erfolgsquote" in response.data
+
+
+def test_logs_page_shows_entries_and_filter(client):
+    with app.app_context():
+        from models import BackupLog
+        db.session.add(BackupLog(server_id=None, status="failed",
+                                 message="Test-Fehler-XYZ"))
+        db.session.add(BackupLog(server_id=None, status="success",
+                                 message="Alles gut"))
+        db.session.commit()
+
+    response = client.get("/logs?status=failed")
+    assert response.status_code == 200
+    assert b"Test-Fehler-XYZ" in response.data
+    assert b"Alles gut" not in response.data
+
+
+def test_logs_page_ignores_bogus_filter_and_page(client):
+    response = client.get("/logs?status=bogus&page=-5")
+    assert response.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Feature: NAS-Retention (Speicherung)
+# ---------------------------------------------------------------------------
+def test_save_nas_retention_days(client):
+    payload = {
+        "mac": "AA:BB:CC:DD:EE:FF",
+        "ip": "10.0.0.50",
+        "ssh_port": "2022",
+        "share_path": "//10.0.0.50/backups",
+        "user": "backupuser",
+        "password": "s3cret",
+        "mount_point": "/mnt/nas",
+        "ssh_shutdown_cmd": "sudo synoshutdown --shutdown",
+        "retention_days": "30",
+    }
+    response = client.post("/nas/save", data=payload)
+    assert response.status_code == 200
+    with app.app_context():
+        from models import NasConfig
+        assert NasConfig.query.first().retention_days == 30
+
+    # Un-gueltiger Wert -> 0 (unbegrenzt), nie ein verrueckter Wert
+    payload["retention_days"] = "abc"
+    client.post("/nas/save", data=payload)
+    with app.app_context():
+        from models import NasConfig
+        assert NasConfig.query.first().retention_days == 0
+
+
+# ---------------------------------------------------------------------------
+# Feature: Matrix-Benachrichtigung
+# ---------------------------------------------------------------------------
+def test_settings_shows_notification_form(client):
+    response = client.get("/settings")
+    assert response.status_code == 200
+    assert b"Fehler-Alarm" in response.data
+
+
+def test_save_notifications_persists(client):
+    payload = {
+        "enabled": "on",
+        "homeserver": "https://matrix.gerbhome.de/",
+        "room_id": "!abc123:gerbhome.de",
+        "access_token": "syt_secret_token",
+        "cooldown_minutes": "30",
+    }
+    response = client.post("/settings/save_notifications", data=payload)
+    assert response.status_code == 200
+    assert b"gespeichert" in response.data
+
+    with app.app_context():
+        from models import SystemState
+        state = SystemState.query.first()
+        assert state.notify_enabled is True
+        # Trailing-Slash wird entfernt
+        assert state.matrix_homeserver == "https://matrix.gerbhome.de"
+        assert state.matrix_room_id == "!abc123:gerbhome.de"
+        assert state.matrix_access_token == "syt_secret_token"
+        assert state.notify_cooldown_minutes == 30
+
+    # Cooldown wird in sinnvolle Grenzen gequetscht (min 5)
+    payload["cooldown_minutes"] = "1"
+    client.post("/settings/save_notifications", data=payload)
+    with app.app_context():
+        from models import SystemState
+        assert SystemState.query.first().notify_cooldown_minutes == 5
+
+    # Ohne "enabled"-Checkbox -> deaktiviert
+    payload.pop("enabled")
+    client.post("/settings/save_notifications", data=payload)
+    with app.app_context():
+        from models import SystemState
+        assert SystemState.query.first().notify_enabled is False
+
+
+def test_notify_is_skipped_when_disabled(client):
+    """Kein Alarm, wenn deaktiviert - und kein Absturz ohne Konfiguration."""
+    import engine.orchestrator as orch
+    from datetime import datetime, timezone
+    with app.app_context():
+        assert orch._notify_if_failed(datetime.now(timezone.utc)) is None

@@ -1,0 +1,31 @@
+{# Bearbeiten-Modal fuer einen Server. Wird per HTMX in #modal-slot
+   (servers.html) geladen; das Script am Ende zeigt das Modal an und
+   raeumt es nach dem Schliessen auf. Nach erfolgreichem Speichern
+   schliesst hx-on::after-request es automatisch (die Tabellen-Zeilen
+   wurden inzwischen getauscht). #}
+<div class="modal fade" id="serverEditModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <form hx-post="/servers/edit/{{ server.id }}"
+                  hx-target="#server-table-body"
+                  hx-swap="innerHTML"
+                  hx-on::after-request="if(event.detail.successful) { var m = bootstrap.Modal.getInstance(document.getElementById('serverEditModal')); if (m) { m.hide(); } }">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        <i class="bi bi-pencil me-2"></i>Server bearbeiten: {{ server.hostname }}
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                {% include "partials/server_modal_form.html" %}
+            </form>
+        </div>
+    </div>
+</div>
+<script>
+(function () {
+    var el = document.getElementById('serverEditModal');
+    if (!el) { return; }
+    el.addEventListener('hidden.bs.modal', function () { el.remove(); });
+    bootstrap.Modal.getOrCreateInstance(el).show();
+})();
+</script>

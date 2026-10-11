@@ -46,6 +46,9 @@ class NasConfig(db.Model):
     password = db.Column(db.String(255), nullable=False)
     mount_point = db.Column(db.String(512), nullable=False, default="/mnt/nas")
     ssh_shutdown_cmd = db.Column(db.String(255), nullable=False, default="sudo /usr/syno/sbin/synoshutdown --shutdown")
+    # Aufbewahrungsfrist auf der NAS in Tagen (0 = unbegrenzt). Es werden
+    # nur die Unterverzeichnisse der konfigurierten Server bereinigt.
+    retention_days = db.Column(db.Integer, nullable=False, default=0)
 
     def __repr__(self):
         return f"<NasConfig {self.ip}:{self.share_path}>"
@@ -93,6 +96,15 @@ class SystemState(db.Model):
     # Update-Wunsch aus der WebUI (z.B. "v1.3.0"). Der root-Daemon pollt
     # diesen Wert, startet update.sh und leert das Feld danach.
     update_pending = db.Column(db.String(32), nullable=True)
+
+    # --- Matrix-Benachrichtigung bei fehlgeschlagenen Zyklen ---------------
+    notify_enabled = db.Column(db.Boolean, nullable=False, default=False)
+    matrix_homeserver = db.Column(db.String(255), nullable=False, default="")
+    matrix_room_id = db.Column(db.String(255), nullable=False, default="")
+    matrix_access_token = db.Column(db.String(512), nullable=False, default="")
+    notify_cooldown_minutes = db.Column(db.Integer, nullable=False, default=60)
+    # Epochen-Sekunden (Float): naive/aware-Datetime-Falle in SQLite meiden.
+    last_notified_at = db.Column(db.Float, nullable=True)
 
     def __repr__(self):
         return f"<SystemState id={self.id} trigger_run={self.trigger_run}>"

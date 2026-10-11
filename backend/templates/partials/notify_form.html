@@ -1,0 +1,59 @@
+{# Benachrichtigungs-Formular (Matrix-Alarm bei fehlgeschlagenen Zyklen).
+   Wird auf der Settings-Seite eingebunden; Speichern per HTMX gegen
+   #notify-msg. #}
+<div class="card mt-4">
+    <div class="card-header">
+        <i class="bi bi-bell me-2"></i>Fehler-Alarm (Matrix)
+    </div>
+    <div class="card-body">
+        <p class="text-secondary small mb-3">
+            Wird eine Backup-Routine fehlgeschlagen (SSH, rsync, NAS), geht
+            automatisch eine Nachricht in den angegebenen Matrix-Raum.
+            Der Cooldown verhindert Alarm-Fluten bei kurzen Intervallen.
+        </p>
+        <form hx-post="/settings/save_notifications"
+              hx-target="#notify-msg"
+              hx-swap="innerHTML">
+            <div class="row g-3">
+                <div class="col-12">
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" name="enabled" id="chNotify"
+                               {{ 'checked' if state and state.notify_enabled else '' }}>
+                        <label class="form-check-label" for="chNotify">Benachrichtigung aktivieren</label>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Homeserver</label>
+                    <input type="text" name="homeserver" class="form-control"
+                           value="{{ state.matrix_homeserver if state and state.matrix_homeserver else 'https://matrix.gerbhome.de' }}"
+                           placeholder="https://matrix.example.org">
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Room-ID</label>
+                    <input type="text" name="room_id" class="form-control"
+                           value="{{ state.matrix_room_id if state else '' }}"
+                           placeholder="!abcdef...:matrix.example.org">
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Access-Token</label>
+                    <input type="password" name="access_token" class="form-control"
+                           value="{{ state.matrix_access_token if state else '' }}"
+                           autocomplete="off">
+                    <small class="text-secondary">Token des Bot-Accounts (Settings &gt; Help &amp; About in Element).</small>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Cooldown (Minuten)</label>
+                    <input type="number" name="cooldown_minutes" class="form-control" min="5" max="1440"
+                           value="{{ state.notify_cooldown_minutes if state and state.notify_cooldown_minutes else 60 }}">
+                    <small class="text-secondary">Mindestabstand zwischen zwei Alarmen (5-1440).</small>
+                </div>
+            </div>
+            <div class="mt-3">
+                <button type="submit" class="btn btn-primary">
+                    <i class="bi bi-save me-1"></i>Speichern
+                </button>
+            </div>
+        </form>
+        <div id="notify-msg" class="mt-3"></div>
+    </div>
+</div>

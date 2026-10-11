@@ -87,6 +87,24 @@ def init_db(app):
         except Exception:
             db.session.rollback()
 
+        # --- Migrationen: NAS-Retention + Matrix-Benachrichtigung ----------
+        _migrations = [
+            "ALTER TABLE nas_config ADD COLUMN retention_days INTEGER DEFAULT 0",
+            "ALTER TABLE system_state ADD COLUMN notify_enabled BOOLEAN DEFAULT 0",
+            "ALTER TABLE system_state ADD COLUMN matrix_homeserver VARCHAR(255) DEFAULT ''",
+            "ALTER TABLE system_state ADD COLUMN matrix_room_id VARCHAR(255) DEFAULT ''",
+            "ALTER TABLE system_state ADD COLUMN matrix_access_token VARCHAR(512) DEFAULT ''",
+            "ALTER TABLE system_state ADD COLUMN notify_cooldown_minutes INTEGER DEFAULT 60",
+            "ALTER TABLE system_state ADD COLUMN last_notified_at FLOAT",
+        ]
+        for _sql in _migrations:
+            try:
+                db.session.execute(text(_sql))
+                db.session.commit()
+            except Exception:
+                # Spalte existiert bereits -> Rollback, ganz normal weiter.
+                db.session.rollback()
+
         # Default-Shutdown-Befehl auf Synology-sicher 'sudo synoshutdown --shutdown'
         # aktualisieren (ersetzt das alte 'poweroff', das sudo erforderte).
         try:

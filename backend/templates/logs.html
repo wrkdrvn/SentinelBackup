@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% set active_page = "Verlauf" %}
+
+{% block content %}
+<h1 class="h3 mb-4"><i class="bi bi-clock-history me-2"></i>Backup-Verlauf</h1>
+
+<!-- Statistik: letzte 30 Tage -->
+<div class="row g-4 mb-4">
+    <div class="col-md-3">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="text-uppercase small text-secondary">Läufe (30 Tage)</div>
+                <div class="display-6 fw-bold">{{ stats.total }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card h-100 {{ 'text-bg-success' if stats.failed == 0 and stats.total > 0 else '' }}">
+            <div class="card-body">
+                <div class="text-uppercase small {{ 'opacity-75' if stats.failed == 0 and stats.total > 0 else 'text-secondary' }}">Erfolgsquote</div>
+                <div class="display-6 fw-bold">{{ stats.rate }}&nbsp;%</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card h-100 {{ 'text-bg-danger' if stats.failed > 0 else '' }}">
+            <div class="card-body">
+                <div class="text-uppercase small {{ 'opacity-75' if stats.failed > 0 else 'text-secondary' }}">Fehlgeschlagen</div>
+                <div class="display-6 fw-bold">{{ stats.failed }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="text-uppercase small text-secondary">Übersprungen</div>
+                <div class="display-6 fw-bold">{{ stats.skipped }}</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Statusfilter -->
+<ul class="nav nav-pills mb-3">
+    <li class="nav-item">
+        <a class="nav-link {{ 'active' if not status }}" href="/logs">Alle</a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link {{ 'active' if status == 'success' }}" href="/logs?status=success">Erfolgreich</a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link {{ 'active' if status == 'failed' }}" href="/logs?status=failed">Fehlgeschlagen</a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link {{ 'active' if status == 'skipped' }}" href="/logs?status=skipped">Übersprungen</a>
+    </li>
+</ul>
+
+<!-- History-Tabelle -->
+<div class="card">
+    <div class="card-body p-0">
+        <table class="table table-hover align-middle mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th>Zeitpunkt (UTC)</th>
+                    <th>Server</th>
+                    <th>Status</th>
+                    <th>Meldung</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% if pagination.items %}
+                    {% for log in pagination.items %}
+                    <tr>
+                        <td class="text-nowrap"><small>{{ log.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</small></td>
+                        <td>
+                            {% if log.server %}
+                                <i class="bi bi-hdd me-1 text-secondary"></i>{{ log.server.hostname }}
+                            {% else %}
+                                <span class="text-secondary">System / NAS</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <span class="badge
+                                {% if log.status == 'success' %}bg-success
+                                {% elif log.status == 'failed' %}bg-danger
+                                {% else %}bg-secondary{% endif %}">{{ log.status }}</span>
+                        </td>
+                        <td><small class="text-secondary">{{ log.message or '' }}</small></td>
+                    </tr>
+                    {% endfor %}
+                {% else %}
+                    <tr>
+                        <td colspan="4" class="text-center text-secondary py-4">
+                            <i class="bi bi-inbox fs-3 d-block mb-2"></i>
+                            Keine Einträge gefunden.
+                        </td>
+                    </tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Pagination -->
+{% if pagination.pages > 1 %}
+<nav class="mt-3">
+    <ul class="pagination justify-content-center">
+        <li class="page-item {{ 'disabled' if not pagination.has_prev }}">
+            <a class="page-link" href="/logs?page={{ pagination.prev_num }}{% if status %}&amp;status={{ status }}{% endif %}">&laquo; Zurück</a>
+        </li>
+        <li class="page-item disabled">
+            <span class="page-link">Seite {{ pagination.page }} von {{ pagination.pages }}</span>
+        </li>
+        <li class="page-item {{ 'disabled' if not pagination.has_next }}">
+            <a class="page-link" href="/logs?page={{ pagination.next_num }}{% if status %}&amp;status={{ status }}{% endif %}">Weiter &raquo;</a>
+        </li>
+    </ul>
+</nav>
+{% endif %}
+{% endblock %}

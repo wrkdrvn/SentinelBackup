@@ -46,6 +46,13 @@
                                value="{{ nas.mount_point if nas else '/mnt/nas' }}">
                     </div>
                     <div class="col-md-6">
+                        <label class="form-label">Aufbewahrung auf der NAS (Tage)</label>
+                        <input type="number" name="retention_days" class="form-control"
+                               min="0" max="3650"
+                               value="{{ (nas.retention_days or 0) if nas else 0 }}">
+                        <small class="text-secondary">0 = unbegrenzt. Bereinigt werden nur die Backup-Ordner der konfigurierten Server, fremde Daten auf dem Share bleiben unberuehrt.</small>
+                    </div>
+                    <div class="col-md-6">
                         <label class="form-label">Benutzer *</label>
                         <input type="text" name="user" class="form-control" required
                                value="{{ nas.user if nas else '' }}"

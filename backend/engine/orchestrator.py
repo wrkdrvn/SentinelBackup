@@ -21,10 +21,14 @@
 
 import os
 import time
+import json
 import shutil
 import subprocess
 import logging
 import logging.handlers
+import urllib.parse
+import urllib.request
+from datetime import datetime, timezone
 
 # Backend-Pfad sicherstellen, damit Importe auch ausserhalb des Gunicorn-
 # Kontexts (z.B. systemd python3-Aufruf) funktionieren.
@@ -480,6 +484,126 @@ def shutdown_nas(nas):
 
 
 # ---------------------------------------------------------------------------
+# NAS-Retention (Feature: alte Backups automatisch bereinigen)
+# ---------------------------------------------------------------------------
+def _apply_nas_retention(nas):
+    """Raeumt alte Backup-Dateien auf der NAS auf (Aufbewahrungsfrist aus
+    nas.retention_days, 0 = aus). SICHERHEIT: Es werden ausschliesslich die
+    Unterverzeichnisse der in der Datenbank konfigurierten Server angefasst
+    (mp/<hostname>) - niemals der Share selbst. Fremde Daten auf der NAS
+    bleiben unangetastet."""
+    try:
+        days = int(getattr(nas, "retention_days", 0) or 0)
+    except (TypeError, ValueError):
+        days = 0
+    if days <= 0:
+        logger.debug("NAS-Retention deaktiviert (0 Tage) - kein Aueraeumen.")
+        return
+
+    mp = os.path.realpath(_mount_point(nas))
+    for srv in Server.query.filter_by(active=True).all():
+        target = os.path.realpath(os.path.join(mp, srv.hostname.replace(" ", "_")))
+        # Harter Schutz: nur unterhalb des Mount-Points arbeiten
+        if not target.startswith(mp + os.sep):
+            logger.warning(f"Retention: Ziel {target} liegt ausserhalb des "
+                           f"Mount-Points {mp} - uebersprungen.")
+            continue
+        if not os.path.isdir(target):
+            continue
+        try:
+            result = subprocess.run(
+                ["find", target, "-type", "f", "-mtime", f"+{days}", "-delete"],
+                capture_output=True, text=True, timeout=600,
+            )
+            if result.returncode != 0:
+                logger.error(f"Retention fehlgeschlagen fuer {target}: "
+                             f"{result.stderr.strip()}")
+                continue
+            deleted = [line for line in result.stdout.splitlines() if line.strip()]
+            # Leere Verzeichnisse nach dem Datei-Delete entfernen
+            subprocess.run(
+                ["find", target, "-type", "d", "-empty", "-delete"],
+                capture_output=True, text=True, timeout=60,
+            )
+            if deleted:
+                logger.info(f"Retention: {len(deleted)} Datei(en) aelter als "
+                            f"{days} Tage in {target} entfernt.")
+            else:
+                logger.debug(f"Retention: nichts zu entfernen in {target}.")
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as exc:
+            logger.error(f"Retention-Fehler fuer {target}: {exc}")
+
+
+# ---------------------------------------------------------------------------
+# Matrix-Benachrichtigung (Feature: Fehler-Alarm)
+# ---------------------------------------------------------------------------
+def _send_matrix(state, text):
+    """Sendet eine m.text-Nachricht in den konfigurierten Matrix-Raum.
+    Genutzt wird der PUT-Endpoint mit Transaction-ID. bewusst stdlib
+    (urllib): update.sh installiert keine Requirements neu, daher darf
+    hier keine neue Abhaengigkeit auftauchen."""
+    room = urllib.parse.quote(state.matrix_room_id, safe="")
+    txn = f"sentinel{int(time.time() * 1000)}"
+    url = (f"{state.matrix_homeserver.rstrip('/')}"
+           f"/_matrix/client/v3/rooms/{room}/send/m.room.message/{txn}")
+    payload = json.dumps({"msgtype": "m.text", "body": text}).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=payload,
+        method="PUT",
+        headers={
+            "Authorization": f"Bearer {state.matrix_access_token}",
+            "Content-Type": "application/json",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        logger.info(f"Matrix-Alarm gesendet (HTTP {resp.status}).")
+
+
+def _notify_if_failed(cycle_start):
+    """Sendet einen Matrix-Alarm, wenn im aktuellen Zyklus Fehler auftraten.
+    Respektiert Aktivierung, Vollstaendigkeit der Konfiguration und
+    Cooldown. Versandfehler duerfen den Zyklus nie beeintraechtigen."""
+    try:
+        state = SystemState.query.first()
+        if state is None or not state.notify_enabled:
+            return
+        if not (state.matrix_homeserver and state.matrix_room_id
+                and state.matrix_access_token):
+            logger.warning("Matrix-Alarm aktiv, aber Homeserver/Room/Token "
+                           "unvollstaendig - ueberspringe.")
+            return
+
+        failed = BackupLog.query.filter(
+            BackupLog.status == "failed",
+            BackupLog.timestamp >= cycle_start,
+        ).all()
+        if not failed:
+            return
+
+        # Cooldown: last_notified_at speichert Epochen-Sekunden (Float)
+        now = time.time()
+        cooldown_sec = (state.notify_cooldown_minutes or 60) * 60
+        if state.last_notified_at and (now - state.last_notified_at) < cooldown_sec:
+            logger.info(f"Matrix-Alarm wegen Cooldown unterdrueckt "
+                        f"({len(failed)} Fehler, letzter Alarm vor "
+                        f"{int(now - state.last_notified_at)}s).")
+            return
+
+        parts = []
+        for entry in failed[:5]:
+            who = entry.server.hostname if entry.server else "NAS/System"
+            parts.append(f"{who}: {entry.message or 'unbekannter Fehler'}")
+        text = (f"SentinelBackup-Alarm: {len(failed)} Fehler im Backup-Zyklus. "
+                + " | ".join(parts))
+        _send_matrix(state, text)
+        state.last_notified_at = now
+        db.session.commit()
+    except Exception as exc:  # noqa: BLE001 - Alarm darf den Zyklus nicht killen
+        logger.error(f"Matrix-Benachrichtigung fehlgeschlagen: {exc}")
+
+
+# ---------------------------------------------------------------------------
 # HAUPTFUNKTION
 # ---------------------------------------------------------------------------
 def run_full_cycle(flask_app):
@@ -492,6 +616,7 @@ def run_full_cycle(flask_app):
         logger.warning("Zyklus uebersprungen - Lock ist nicht frei "
                        "(anderer Zyklus laeuft).")
         return
+    cycle_start = datetime.now(timezone.utc)
 
     try:
         with flask_app.app_context():
@@ -569,6 +694,9 @@ def run_full_cycle(flask_app):
                                     _clear_cache_contents()
                                     logger.info("Cache nach erfolgreichem Push geleert.")
                                     _log(None, "success", "rsync push auf NAS erfolgreich.")
+                                    # Retention: erst NACH erfolgreichem Push,
+                                    # solange die Share noch gemountet ist.
+                                    _apply_nas_retention(nas)
                                 else:
                                     logger.error("rsync push auf NAS fehlgeschlagen - Cache NICHT geloescht.")
                                     _log(None, "failed", "rsync push auf NAS fehlgeschlagen.")
@@ -580,6 +708,9 @@ def run_full_cycle(flask_app):
 
                         # NAS Shutdown (nur wenn NAS erreichbar war)
                         shutdown_nas(nas)
+
+            # Matrix-Alarm, falls in DIESEM Zyklus Fehler auftraten
+            _notify_if_failed(cycle_start)
 
             logger.info("=== Backup-Zyklus abgeschlossen ===")
 
