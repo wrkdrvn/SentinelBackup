@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SentinelBackup - Database Engine Setup
 # Author: WrkDrvn
-# Version: 1.2.0
+# Version: 1.3.0
 #
 # Definiert das zentrale SQLAlchemy-Objekt und stellt init_db(app)
 # bereit. db wird hier (nicht in app.py) definiert, um

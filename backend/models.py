@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SentinelBackup - SQLAlchemy Models
 # Author: WrkDrvn
-# Version: 1.2.0
+# Version: 1.3.0
 #
 # Datenmodelle fuer Server und NAS-Konfiguration.
 

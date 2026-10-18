@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SentinelBackup - Backend Application
 # Author: WrkDrvn
-# Version: 1.2.0
+# Version: 1.3.0
 #
 # Flask-Backend mit SQLAlchemy-Datenbank und HTMX-Fragment-Routen.
 # Gewartet von Gunicorn hinter Nginx.

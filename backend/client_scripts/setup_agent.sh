@@ -1,7 +1,7 @@
 #!/bin/bash
 # SentinelBackup - Agent Installer
 # Author: WrkDrvn
-# Version: 1.2.0
+# Version: 1.3.0
 #
 # Interaktiver Installer fuer Zielserver. Richtet den SentinelBackup Agent
 # unter /opt/sentinel_agent/ ein, schreibt Konfiguration in eine separate
@@ -60,7 +60,7 @@ echo "|                                                               |"
 echo "+---------------------------------------------------------------+"
 echo ""
 echo ""
-echo "SentinelBackup Agent Installer Version 1.2.0"
+echo "SentinelBackup Agent Installer Version 1.3.0"
 echo ""
 echo ""
 
